@@ -1,0 +1,21 @@
+# Web framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+
+# Config
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# Google Cloud
+google-cloud-aiplatform>=1.50.0
+google-cloud-firestore>=2.16.0
+google-cloud-storage>=2.16.0
+google-auth>=2.29.0
+google-api-python-client>=2.126.0
+
+# AI / LangChain
+langchain>=0.2.0
+langchain-google-vertexai>=1.0.0
+
+# Dev
+python-dotenv>=1.0.0
