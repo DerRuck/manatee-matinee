@@ -1,6 +1,6 @@
 
 # C-HAWQ AI System
-## High-Level Architecture Blueprint (V1 Lean Edition)
+## High-Level Architecture Blueprint (V2 Multi-Agent Edition)
 
 ---
 
@@ -19,22 +19,25 @@ The system is strictly scoped to generate these outputs. (Note: General meeting 
 * **Email Drafts:** Written in the Company tone, pushed directly to their Gmail Drafts folder.
 * **Meeting Prep Notes:** Structured agendas and pain-point summaries, pushed to a new Google Doc.
 * **Formal PDF Letters:** Proposals and formal follow-ups, generated and edited in the web app, then downloaded.
+* **Visual Presentations (Slide Decks):** Introductory and discovery slide decks.
 
 ---
 
 # 3. The Technology Stack
 
 ### AI
-* **Gemini 1.5 Pro (Vertex AI):** The core reasoning engine. Writes the artifacts, extracts action items, and answers chat queries.
-* **text-embedding-004 (Vertex AI):** Converts text into math (vectors) so the database can search by meaning.
-* **LangChain:** The Python library that wires the LLM to the databases.
+* **Gemini (Vertex AI) or Claude:** The core reasoning engine. Writes the artifacts, extracts action items, and answers chat queries.
+* **text-embedding-004 (Vertex AI) or Voyage embeddings:** Converts text into math (vectors) so the database can search by meaning.
+* **LangGraph:** The multi-agent orchestration framework. Manages the state, routes tasks between different agents, and handles "loops" (like pausing for human approval).
 
 ### Backend 
 * **FastAPI:** The Python web framework. Acts as the traffic cop, catching requests from the UI or Drive and routing them.
 * **Google Cloud Run:** The serverless cloud infrastructure where the FastAPI code lives.
+* **GoHighLevel:** Integrates with the CRM allowing 
 
 ### Frontend 
 * **React (or Next.js):** A clean web dashboard containing only two things: a **Chat Interface** (for on-demand Q&A/summaries) and a **Task Manager** (to review/edit the AI's generated PDFs and emails).
+* **Slack API:** An easy to implement chat interface for interaction with the agents 
 
 ### Storage & Databases (The V1 Strategy)
 * **Google Drive:** The source of truth. Humans and automated scripts drop files here. The AI reads them *in-place* without moving them.
@@ -44,9 +47,28 @@ The system is strictly scoped to generate these outputs. (Note: General meeting 
 
 ---
 
-# 4. The 8-Step System Flow
+## 4. The Agent Ecosystem
 
-The system operates in a single, continuous loop, split into three phases:
+The system utilizes LangGraph to manage a hierarchy of "Supervisor" agents that delegate complex tasks to specialized "Subagents." 
+
+* **1. Deep Research Agent (Supervisor):**
+    * *Internal Memory Subagent:* Searches the Firestore Vector DB to pull past C-HAWQ transcripts, internal notes, and previous emails.
+    * *External Scraper Subagent:* Uses web scraping tools to hunt down municipal budgets, local news, and organizational history on the public internet.
+* **2. Email Agent (Supervisor):**.
+    * *Triage Subagent (Inbound):* Monitors inbound webhook data to categorize messages (e.g., idle chat vs. high-quality lead intent).
+    * *Drafter Subagent (Outbound):* Synthesizes context to write scheduling or follow-up replies mimicking the C-HAWQ brand voice.
+* **3. Presentation Agent (Supervisor):**.
+    * *Outliner Subagent:* Focuses purely on sales psychology and the proven process to draft the narrative text for the slides.
+    * *Design / API Subagent:* Takes the approved outline and translates it into the rigid JSON formatting required to execute the Google Slides API.
+* **4. Letter Agent (Standalone):** Synthesizes context to draft formal Google Doc letters, ensuring strict alignment with the brand guide.
+* **5. Evaluation & Scoring Agent (Standalone):** The pipeline manager. Continuously evaluates the lead against C-HAWQ's qualifying criteria and updates the lead's priority score and stage in the Firestore database.
+* **6. Improvement Loop Agent (Standalone):** The self-refining engine. Ingests internal post-mortem debriefs and team corrections to optimize the system's prompts for future execution.
+
+---
+
+# 5. The System Flow
+
+The system operates in a continuous stateful loop split into three phases:
 
 ### Phase A: Data Ingestion (Hunting & Memorizing)
 1. **The Raw Input:** A Human or automated script/scraper drops a raw file (audio, transcript, PDF, etc) into their normal Google Drive folder.
@@ -64,11 +86,12 @@ The system operates in a single, continuous loop, split into three phases:
 
 ---
 
-# 5. Core Architectural Guardrails
+# 6. Core Architectural Guardrails
 
 * **Rule 1: The AI Adapts to the Humans.** Zero disruption to existing Drive folders. The AI reads in-place.
-* **Rule 2: Asynchronous Tasks Only.** The backend must always reply to the frontend instantly with a "Task ID" while the AI generates in the background.
+* **Rule 2: Asynchronous Tasks Only.** The backend must reply to webhooks and UI requests instantly while the multi-agent network processes in the background.
 * **Rule 3: No Autonomous Execution.** The AI only creates drafts. A human is always the final barrier.
 * **Rule 4: Full Transcripts for Memory, On-Demand for Summaries.** Do not pre-generate expensive summaries. Save the full cleaned text for accurate vector search, and let the users ask the Chat UI if they want a summary.
+* **Rule 5: Stateful Lead Tracking.** The system must never treat a prompt as an isolated event; it must always check Firestore to know exactly where the lead is in the proven process before acting.
 
 ---

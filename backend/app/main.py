@@ -1,7 +1,7 @@
 from fastapi import FastAPI
+from backend.app.routes import webhooks
 
-app = FastAPI()
+app = FastAPI(title="C-HAWQ AI Backend")
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+# Register the webhook routes
+app.include_router(webhooks.router)
