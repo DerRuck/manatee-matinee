@@ -26,6 +26,7 @@ steps:
       - '--build-service-account=projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
       - '--set-env-vars=ENV=dev,GCP_PROJECT_ID=chawq-manatee-matinee,DRIVE_WATCH_FOLDER_ID=1CJmk437SVaFcWqVBrsIOMYO1ac7oZHHq,GHL_LOCATION_ID=As8Nc8kEs6J86YgDIi9Q'
       - '--set-secrets=ANTHROPIC_API_KEY=anthropic-api-key:latest,GHL_PIT=ghl-pit:latest,GHL_WEBHOOK_SECRET=ghl-webhook-secret:latest'
+      - '--service-account=chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
 
 serviceAccount: 'projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
 
