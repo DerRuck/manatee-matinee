@@ -1,3 +1,12 @@
+"""
+Local smoke test for the Hello World agent.
+
+Run from the repo root (parent of backend/):
+    python -m backend.utils.test_agent
+
+Reads ANTHROPIC_API_KEY from the .env file at repo root.
+
+"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -15,7 +24,11 @@ result = agent.run(
         "municipality": "Rookery Bay National Estuarine Research Reserve",
         "state": "Florida",
         "contact": "Reserve Manager, Collier County",
-        "notes": "Manages 110,000 acres of mangrove estuary near Naples; key habitat for manatees, sea turtles, and shorebirds; active water quality monitoring program",
+        "notes": (
+            "Manages 110,000 acres of mangrove estuary near Naples; "
+            "key habitat for manatees, sea turtles, and shorebirds; "
+            "active water quality monitoring program"
+        ),
     },
 )
 

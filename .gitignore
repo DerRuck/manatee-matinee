@@ -1,5 +1,31 @@
+# Env + secrets
 .env
-CLAUDE.md
+.env.local
+.env.*.local
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
 venv/
 env/
-__pycache__/
+.pytest_cache/
+pytest-cache-files-*/
+.ruff_cache/
+.mypy_cache/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.next/
+
+# OS + editors
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log

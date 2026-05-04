@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Tests import modules like `from app.main import app` and `from core.settings ...`
+# Adding `.` (i.e. `backend/`) to sys.path lets pytest resolve them without
+# a packaging install.
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -5,7 +5,7 @@ from typing import Any
 import anthropic
 import yaml
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
 

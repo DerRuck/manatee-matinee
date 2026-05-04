@@ -1,0 +1,1 @@
+"""Firestore client wrapper. Stub."""
