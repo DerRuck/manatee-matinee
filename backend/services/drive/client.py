@@ -21,11 +21,11 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any
+from typing import Any, Iterator
 
 from google.auth import default, impersonated_credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 from core.settings import Settings, get_settings
 
@@ -34,6 +34,22 @@ logger = logging.getLogger(__name__)
 
 SA_EMAIL = "chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+
+GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
+
+# Drive folders carry their own mime type. Used by walk_folder() to decide
+# what to recurse into vs. yield as a leaf.
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+# Plain text-ish mime types we can download as raw bytes.
+PLAIN_TEXT_MIMES = {
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "application/octet-stream",  # Drive sometimes mislabels .md as octet-stream
+}
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 _drive_service: Any | None = None
@@ -95,6 +111,175 @@ def upload_text_file(
         .execute()
     )
     return response
+
+
+def list_folder_files(
+    folder_id: str,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    List non-trashed children of `folder_id` (one level only — no recursion).
+
+    Returns Drive Files responses with these fields populated:
+      - id, name, mimeType, modifiedTime, webViewLink, parents
+
+    Children include subfolders (mimeType == FOLDER_MIME); callers that want
+    to flatten file trees should use `walk_folder()` instead.
+    """
+    service = _get_drive_service()
+    files: list[dict[str, Any]] = []
+    page_token: str | None = None
+
+    while True:
+        resp = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                fields=(
+                    "nextPageToken, "
+                    "files(id, name, mimeType, modifiedTime, webViewLink, parents)"
+                ),
+                pageSize=page_size,
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
+        files.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+    return files
+
+
+def get_file_metadata(file_id: str) -> dict[str, Any]:
+    """Fetch a single file's metadata (id, name, mimeType, parents)."""
+    service = _get_drive_service()
+    return (
+        service.files()
+        .get(
+            fileId=file_id,
+            fields="id, name, mimeType, parents",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+
+
+def walk_folder(
+    root_folder_id: str,
+    page_size: int = 100,
+    max_depth: int = 16,
+) -> Iterator[tuple[dict[str, Any], list[str]]]:
+    """
+    Recursively walk a Drive folder tree, yielding non-folder leaves.
+
+    Each yield is a tuple `(file_meta, path_segments)`:
+      - file_meta: same shape as `list_folder_files()` entries.
+      - path_segments: folder names from the root *down to* the file's
+        immediate parent. Files directly inside `root_folder_id` get an
+        empty list; files one level deeper get a single-element list, etc.
+
+    Subfolders are recursed into, never yielded. Trashed items are skipped.
+    `max_depth` is a safety stop against unexpectedly deep trees (the V1
+    corpus convention is two levels: <municipality>/<document_type>).
+
+    The root folder's own name is NOT included in path_segments; callers
+    that want it can pass `root_folder_id` to `get_file_metadata()`.
+    """
+    # Breadth-first queue of (folder_id, path_so_far).
+    stack: list[tuple[str, list[str], int]] = [(root_folder_id, [], 0)]
+
+    while stack:
+        folder_id, path, depth = stack.pop(0)
+        if depth > max_depth:
+            logger.warning(
+                "walk_folder depth limit hit — skipping",
+                extra={"folder_id": folder_id, "path": "/".join(path), "depth": depth},
+            )
+            continue
+
+        children = list_folder_files(folder_id, page_size=page_size)
+        for child in children:
+            mime = child.get("mimeType")
+            if mime == FOLDER_MIME:
+                stack.append((child["id"], path + [child["name"]], depth + 1))
+                continue
+            yield child, list(path)
+
+
+def download_file_as_text(file_id: str, mime_type: str) -> str | None:
+    """
+    Download a Drive file's content as plain UTF-8 text.
+
+      - Google Doc -> export as text/plain
+      - text/plain or text/markdown -> raw bytes -> utf-8
+      - .docx -> raw bytes -> python-docx -> paragraphs + table cells joined
+      - Anything else -> None (caller logs and skips)
+    """
+    service = _get_drive_service()
+
+    if mime_type == GOOGLE_DOC_MIME:
+        result = (
+            service.files()
+            .export(fileId=file_id, mimeType="text/plain")
+            .execute()
+        )
+        return result.decode("utf-8") if isinstance(result, bytes) else result
+
+    if mime_type in PLAIN_TEXT_MIMES:
+        return _download_bytes(service, file_id).decode("utf-8", errors="replace")
+
+    if mime_type == DOCX_MIME:
+        return _docx_bytes_to_text(_download_bytes(service, file_id))
+
+    logger.info(
+        "drive download skip — unsupported mime type",
+        extra={"file_id": file_id, "mime_type": mime_type},
+    )
+    return None
+
+
+def _download_bytes(service, file_id: str) -> bytes:
+    """Internal: get_media -> in-memory bytes."""
+    request = service.files().get_media(fileId=file_id)
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buf.getvalue()
+
+
+def _docx_bytes_to_text(data: bytes) -> str:
+    """
+    Extract text from a .docx file's raw bytes.
+
+    Pulls paragraph text and table cells in document order. Skips empty
+    paragraphs and trims whitespace; doesn't attempt to preserve formatting,
+    images, comments, or footnotes — none of those help embedding quality.
+    """
+    # Lazy import: python-docx is only needed when we hit a .docx file.
+    from docx import Document as DocxDocument  # type: ignore
+
+    doc = DocxDocument(io.BytesIO(data))
+
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            parts.append(text)
+
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            row_text = " | ".join(c for c in cells if c)
+            if row_text:
+                parts.append(row_text)
+
+    return "\n".join(parts)
 
 
 class DriveClient:

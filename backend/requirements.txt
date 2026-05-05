@@ -21,6 +21,10 @@ google-cloud-firestore>=2.16.0
 google-cloud-storage>=2.16.0
 google-auth>=2.29.0
 google-api-python-client>=2.126.0
+google-cloud-aiplatform>=1.49.0  # Vertex text-embedding-005 + future Gemini calls
+
+# --- Document parsers (ingestion pipeline) ---
+python-docx>=1.1.0  # parse .docx files from Drive into plain text
 
 # --- Webhook signature verification (Ed25519 for GHL, HMAC in stdlib) ---
 # doesnt install locally 

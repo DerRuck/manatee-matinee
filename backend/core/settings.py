@@ -48,7 +48,15 @@ class Settings(BaseSettings):
     firestore_agent_runs_collection: str = "agent_runs"
     firestore_feedback_collection: str = "feedback"
     firestore_prompt_versions_collection: str = "prompt_versions"
-    firestore_vector_collection: str = "vector_chunks"
+    # Ingestion: documents (one row per Drive file) + chunks (retrieval surface).
+    # Names locked 2026-04-23 schema decision; supersede the earlier
+    # `vector_chunks` placeholder which was scaffolding from before the lock.
+    firestore_documents_collection: str = "documents"
+    firestore_chunks_collection: str = "chunks"
+
+    # --- Vector embeddings (Vertex) ---
+    vertex_embedding_model: str = "text-embedding-005"
+    vertex_embedding_dimensions: int = 768
 
     # --- Google Drive ---
     # Service account JSON path for local dev; ADC used in Cloud Run.
