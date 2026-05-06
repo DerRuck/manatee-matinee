@@ -60,22 +60,6 @@ async def drive_webhook(
         },
     )
 
-    # --- SPIKE DEBUG (Sprint 1 Task 3) — remove before Sprint 2 merge ---------
-    # Goal: capture every X-Goog-* header Drive actually sends so we can lock
-    # down the handler shape + channel-registry schema for Sprint 2.
-    goog_headers = {
-        k: v for k, v in request.headers.items() if k.lower().startswith("x-goog-")
-    }
-    try:
-        body_preview = (await request.body()).decode("utf-8")[:1000]
-    except UnicodeDecodeError:
-        body_preview = "<non-utf8 body>"
-    logger.info(
-        "drive webhook SPIKE debug",
-        extra={"goog_headers": goog_headers, "body_preview": body_preview},
-    )
-    # --- end SPIKE DEBUG ------------------------------------------------------
-
     # Handshake event — Drive sends one of these the moment the channel is
     # created. No file changed; just confirm receipt and move on.
     if x_goog_resource_state == "sync":
@@ -120,24 +104,6 @@ async def ghl_webhook(
             "has_legacy_sig": bool(x_wh_signature),
         },
     )
-
-    # --- SPIKE DEBUG — remove before Sprint 2 (Agents) merge ---------
-    # Goal: see what GHL actually sends so we can lock the signature header name,
-    # the event-type field, and the payload shape for the Sprint 2 handler.
-    try:
-        body_preview = body.decode("utf-8")[:2000]
-    except UnicodeDecodeError:
-        body_preview = repr(body[:1000])
-    safe_headers = {
-        k: v
-        for k, v in request.headers.items()
-        if k.lower() not in {"authorization", "cookie", "proxy-authorization"}
-    }
-    logger.info(
-        "ghl webhook SPIKE debug",
-        extra={"headers": safe_headers, "body_preview": body_preview},
-    )
-    # --- end SPIKE DEBUG ------------------------------------------------------
 
     # Parse the JSON payload defensively. GHL Workflow webhooks send JSON,
     # but we don't want a malformed body to 500 the endpoint — log and accept
