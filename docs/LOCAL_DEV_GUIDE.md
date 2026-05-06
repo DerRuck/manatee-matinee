@@ -246,45 +246,65 @@ python -m scripts.test_vector_query --query "what concerns came up about dredgin
 
 ## Push-to-deploy flow
 
-The pipeline is GitHub `main` → Cloud Build trigger → Cloud Run.
+Two services, two branches, two pipelines.
+
+| Branch | Cloud Build config | Cloud Run service | URL | Anthropic key |
+|---|---|---|---|---|
+| `dev` | `cloudbuild.dev.yaml` | `chawq-api-dev` | `https://chawq-api-dev-783495307551.us-central1.run.app` | `anthropic-api-key-dev` |
+| `main` | `cloudbuild.yaml` | `chawq-api` | `https://chawq-api-783495307551.us-central1.run.app` | `anthropic-api-key` |
+
+Both services run as `chawq-api-runtime`. Both builds run as `chawq-builder`. They share the same Firestore database for V1 — chunks ingested from dev are tagged via `data_source` so prod queries can filter them out if needed. Real DB-level isolation is a V2 decision.
+
+### The flow
+
+Day-to-day work goes onto `dev`, gets validated against the dev URL, then merges to `main` via PR.
 
 ```bash
-git status
-git add <specific files>          # avoid `git add .`
-git commit -m "Short, present-tense summary"
-git push origin main
+git checkout dev
+git pull origin dev
+# work, commit
+git push origin dev          # fires the dev trigger -> chawq-api-dev redeploys
 ```
-### **In the future direct pushing to main will be blocked. Please make a branch and merge into main**
-Same commands in PowerShell. `git push` fires the trigger. Watch the build at the [Cloud Build console](https://console.cloud.google.com/cloud-build/builds?project=chawq-manatee-matinee) — pytest runs first, then `gcloud run deploy --source=. --service-account=chawq-api-runtime@...` deploys. End-to-end takes 6–10 minutes.
 
-The build runs as `chawq-builder`. The deployed service runs as `chawq-api-runtime`. Both are explicit in `cloudbuild.yaml`.
+When the change is ready for prod:
+
+```text
+Open a PR: dev -> main on GitHub
+After approval + merge, the main trigger fires -> chawq-api redeploys
+```
+
+Direct pushes to `main` are blocked at the GitHub branch-protection layer (require PR + review). Same git commands work in PowerShell.
+
+`git push` fires whichever trigger matches the branch pattern. Watch builds in the [Cloud Build console](https://console.cloud.google.com/cloud-build/builds?project=chawq-manatee-matinee). pytest runs first, then `gcloud run deploy --source=...` redeploys the matching service. End-to-end takes 6–10 minutes per pipeline.
 
 ### Confirm the deploy is live
+
+Replace `<service>` with `chawq-api` (prod) or `chawq-api-dev` (dev).
 
 PowerShell:
 
 ```powershell
-gcloud run revisions list --service=chawq-api --region=us-central1 --limit=5
-Invoke-RestMethod https://chawq-api-783495307551.us-central1.run.app/health
+gcloud run revisions list --service=<service> --region=us-central1 --limit=5
+Invoke-RestMethod https://<service>-783495307551.us-central1.run.app/health
 ```
 
 Bash:
 
 ```bash
-gcloud run revisions list --service=chawq-api --region=us-central1 --limit=5
-curl https://chawq-api-783495307551.us-central1.run.app/health
+gcloud run revisions list --service=<service> --region=us-central1 --limit=5
+curl https://<service>-783495307551.us-central1.run.app/health
 ```
 
-The revision list should show your new revision with today's timestamp. `/health` should return `{"status":"ok"}`.
+The revision list should show your new revision with today's timestamp. `/health` returns `{"status":"ok"}`.
 
 ### Roll back
 
-If a deploy turns out to be bad, route traffic back to the previous revision without re-deploying.
+If a deploy turns out to be bad, route traffic back to the previous revision without re-deploying. Use `chawq-api` for prod, `chawq-api-dev` for dev.
 
 PowerShell:
 
 ```powershell
-gcloud run services update-traffic chawq-api `
+gcloud run services update-traffic <service> `
     --to-revisions=<PRIOR_REVISION>=100 `
     --region=us-central1
 ```
@@ -292,7 +312,7 @@ gcloud run services update-traffic chawq-api `
 Bash:
 
 ```bash
-gcloud run services update-traffic chawq-api \
+gcloud run services update-traffic <service> \
     --to-revisions=<PRIOR_REVISION>=100 \
     --region=us-central1
 ```
@@ -307,7 +327,7 @@ If CI/CD is broken and you need to ship from local, see the **Manual deploy** bl
 
 ## Reading Cloud Run logs
 
-The deployed service logs to Cloud Logging. The simplest way to tail recent activity:
+The deployed services log to Cloud Logging. Swap `chawq-api` for `chawq-api-dev` to read dev logs.
 
 PowerShell:
 
@@ -329,7 +349,7 @@ gcloud logging read \
 
 Or open the [Cloud Run service in the console](https://console.cloud.google.com/run/detail/us-central1/chawq-api/logs?project=chawq-manatee-matinee) and use the LOGS tab.
 
-There's an alert policy named `chawq-api ERROR alert` that fires on any ERROR-severity log line and emails `chawq-api-errors-email`. If you push a change that pages someone, the email arrives within 1–2 minutes.
+The alert policy `chawq-api ERROR alert` fires on any ERROR-severity log line on the prod service and emails `chawq-api-errors-email`. The dev service is not currently wired to that alert — dev errors stay in logs only.
 
 ---
 
@@ -341,4 +361,4 @@ There's an alert policy named `chawq-api ERROR alert` that fires on any ERROR-se
 
 **Vertex returns `input token count is X but the model supports up to 20000`.** A single embed batch overflowed the 20K-token cap. This is handled in `services/embeddings/vertex.py` via dynamic batching at 12K estimated tokens; if you change the chunker or the batch heuristic, leave headroom — transcripts pack ~1.5–1.6 tokens/word, which is higher than the words×1.3 estimator.
 
-**The pipeline runs but the new code isn't live.** Check the Cloud Build console for the run status — the trigger is on `^main$`, so non-main branches don't deploy. Confirm you pushed to `main` (`git log origin/main..HEAD` should be empty after a successful push).
+**The pipeline runs but the new code isn't live.** Check the Cloud Build console for the run status. The prod trigger is on `^main$`, the dev trigger is on `^dev$` — pushes to feature branches don't deploy anywhere. Confirm you pushed to the right branch (`git log origin/<branch>..HEAD` should be empty after a successful push).
