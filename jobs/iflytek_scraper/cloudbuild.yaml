@@ -1,0 +1,21 @@
+steps:
+  # Build container
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'jobs/iflytek_scraper'
+    args: [
+      'build',
+      '-t',
+      'us-central1-docker.pkg.dev/chawq-manatee-matinee/iflytek-repo/iflytek-job:latest',
+      '.'
+    ]
+
+  # Push container
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'jobs/iflytek_scraper'
+    args: [
+      'push',
+      'us-central1-docker.pkg.dev/chawq-manatee-matinee/iflytek-repo/iflytek-job:latest'
+    ]
+
+images:
+  - 'us-central1-docker.pkg.dev/chawq-manatee-matinee/iflytek-repo/iflytek-job:latest'
