@@ -25,6 +25,10 @@ google-cloud-aiplatform>=1.49.0  # Vertex text-embedding-005 + future Gemini cal
 
 # --- Document parsers (ingestion pipeline) ---
 python-docx>=1.1.0  # parse .docx files from Drive into plain text
+pypdf>=4.2.0  # native PDF text extraction (Iflytek transcripts, email attachments)
+
+# --- Document renderers (agent outputs) ---
+python-pptx>=1.0.0  # render Presentation Outliner JSON spec into branded decks
 
 # --- Webhook signature verification (Ed25519 for GHL, HMAC in stdlib) ---
 # doesnt install locally 
