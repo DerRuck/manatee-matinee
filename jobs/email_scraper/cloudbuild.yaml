@@ -1,9 +1,9 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    dir: 'jobs/email-scraper'
+    dir: 'jobs/email_scraper'
     args: ['build', '-t', 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest', '.']
   - name: 'gcr.io/cloud-builders/docker'
-    dir: 'jobs/email-scraper'
+    dir: 'jobs/email_scraper'
     args: ['push', 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest']
 images:
   - 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest'
