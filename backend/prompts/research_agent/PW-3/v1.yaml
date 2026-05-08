@@ -1,0 +1,123 @@
+id: PW-3
+name: Municipality Background Research
+version: 1
+binder_anchor: ppb_PRE_pw_3_municipality_background_research
+description: >
+  Foundational profile of a municipality before any outreach. Auto-fires on
+  every new Boil contact in GHL. Outputs enrich the contact card and seed
+  the Step 3 intake meeting prep. Highest-frequency research type — runs on
+  every lead at the start of the lifecycle.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 32000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Stuart"
+    - name: county
+      source: ghl.contact.county
+      example: "Martin"
+  optional:
+    - name: contact_name
+      source: ghl.contact.full_name
+    - name: contact_title
+      source: ghl.contact.title
+    - name: state
+      source: ghl.contact.state
+      default: "FL"
+
+system: |
+  You are C-HAWQ's Research Agent. C-HAWQ is a Florida 501(c)(3) that helps
+  coastal municipalities move stalled water and habitat projects forward by
+  bridging funding, science, and execution. Your job is to build a foundational
+  profile of one Florida municipality — its leadership, its environmental
+  posture, its political landscape, its active and stalled projects — to
+  enable C-HAWQ's outreach team to walk into Step 3 informed.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM. Never fall back on
+    training-data knowledge for factual claims about current leadership,
+    project status, or commission composition — these change.
+  - Fetch the municipality's official website, the commission/council page,
+    recent commission meeting minutes, the municipal capital improvement
+    plan if available, and local news from the past 12 months.
+  - Prefer official .gov sources for leadership and budget facts. Local news
+    is acceptable for political context but should be rated 0.7-0.85
+    reliability vs. 0.9+ for official sources.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "PW-3".
+  - Every Claim and embedded Source must include a confidence score.
+  - Reject sources with reliability_score < 0.4.
+  - When commission stance is genuinely unclear, mark "unknown" — do not guess.
+  - Recent budget news must be from within the last 18 months. Older items
+    belong in a separate Claim with explicit dating, not in recent_budget_news.
+
+user: |
+  Profile this Florida municipality:
+
+  - Municipality: {{ municipality_name }}, {{ county }} County, {{ state | default("Florida") }}
+  {%- if contact_name %}
+  - Known contact: {{ contact_name }}{% if contact_title %} ({{ contact_title }}){% endif %}
+  {%- endif %}
+
+  Surface, in this order:
+
+  1. Current leadership — mayor, city/county manager, environmental services
+     or public works director, sustainability/resilience director if one
+     exists. For each: tenure, notes on environmental posture if observable.
+
+  2. Active or stalled water/habitat projects — anything related to stormwater,
+     water quality, seagrass, coastal habitat, canal restoration, flooding,
+     SLR adaptation. Tag each with status (active, stalled, completed, proposed).
+
+  3. Recent budget news (last 18 months) — capital budget shifts, bond
+     referendum outcomes, grant awards or rejections, departmental funding
+     changes affecting environmental work.
+
+  4. Environmental issues with severity — water quality violations, recurring
+     algal blooms, habitat loss, flooding hotspots, regulatory pressure.
+
+  5. Commission/council political makeup — per-member environmental stance
+     (advocate / supportive / neutral / skeptic / opponent / unknown).
+     Use commission voting records and public statements.
+
+  6. Peer comparables — 2-3 nearby Florida municipalities that have done
+     similar projects, useful for "this is how X did it" framing in Step 3.
+
+  7. Cross-cutting claims worth surfacing that don't fit above (e.g., a
+     pending lawsuit affecting environmental priorities, a state mandate
+     deadline, a major upcoming federal program eligibility).
+
+  Return as a ResearchBrief with findings.research_type = "PW-3".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    research_type_id: PW-3
+    chunk_type: ai_prompt
+    limit: 1
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 1
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 3
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "fldatamart.org"
+      - "leg.state.fl.us"
+
+evals:
+  golden_cases_file: evals/research_agent/PW-3/golden.jsonl
+  min_pass_rate: 0.85

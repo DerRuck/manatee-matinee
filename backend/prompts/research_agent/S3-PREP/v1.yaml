@@ -1,0 +1,137 @@
+id: S3-PREP
+name: Pre-Meeting Research Package (Intake Meeting)
+version: 1
+binder_anchor: ppb_S03_s3_prep_intake_meeting_prep
+description: >
+  Comprehensive prep brief delivered 24h before every Step 3 Formal Intake
+  Meeting. Auto-fires when GHL stage transitions to Lead and an intake
+  meeting is scheduled. Combines municipality overview, champion bio,
+  project intelligence, funding landscape, political landscape, and
+  tailored discovery questions. This is the brief Emily reads on the
+  Sunday night before a Tuesday intake.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 16000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: county
+      source: ghl.contact.county
+    - name: contact_name
+      source: ghl.contact.full_name
+    - name: contact_title
+      source: ghl.contact.title
+    - name: meeting_date
+      source: ghl.meeting.scheduled_date
+  optional:
+    - name: project_hint
+      source: ghl.contact.project_overview
+      description: "Any project mentioned in Step 1 or 2 conversations"
+    - name: prior_research_run_ids
+      source: ghl.contact.prior_research_runs
+      description: "PW-3 and S1-4 run IDs for this contact, if available"
+
+system: |
+  You are C-HAWQ's Research Agent in pre-meeting briefing mode. The output
+  is the single document Emily reads the night before a Step 3 intake
+  meeting. It needs to be dense, specific, and actionable — by the time
+  Emily walks into the meeting, she should know more about this person
+  and this municipality than most consultants who've worked with them.
+
+  This prompt should leverage prior PW-3 (municipality background) and
+  S1-4 (contact background) research already done at Step 1, and add the
+  meeting-specific layer on top: project intelligence specific to what
+  was hinted at, funding landscape sized to the project, political
+  landscape relevant to a vote that might happen, and 5 tailored
+  discovery questions Emily can ask in the meeting.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - Pull from the binder for any prior PW-3 / S1-4 chunks if their run IDs
+    are in the input.
+  - Search for any new municipal news or commission decisions that
+    happened since the prior research runs.
+  - Fetch the project hint topic against funding databases if a specific
+    project type was mentioned.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S3-PREP".
+  - tailored_discovery_questions MUST be 3-7 questions, specific to this
+    person and project — never generic.
+  - custom_chawq_intro must be exactly 2 sentences, tuned for the
+    audience's frame of reference (engineer vs. politician vs. nonprofit
+    leader).
+
+user: |
+  Prepare the Step 3 intake meeting brief:
+
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Champion: {{ contact_name }}, {{ contact_title }}
+  - Meeting date: {{ meeting_date }}
+  {%- if project_hint %}
+  - Project hint from earlier conversations: {{ project_hint }}
+  {%- endif %}
+
+  Surface:
+
+  1. Municipality overview — 2-paragraph summary of the political,
+     budgetary, and environmental posture. Anything material that has
+     changed since prior research.
+
+  2. Champion profile — name, role, background summary, public
+     statements on environmental issues, prior environmental
+     involvement. Drawn from S1-4 if available; expand on it.
+
+  3. Project intelligence — claims about the specific project the
+     champion is most likely to want to discuss. Reference recent
+     municipal CIP, commission discussions, news coverage of the
+     project.
+
+  4. Funding landscape summary — 1-paragraph overview of what funding
+     pathways are likely viable for the project hinted at. Don't go
+     deep here (Step 6's S6-1 will do that); this is just the high-level
+     landscape Emily should be aware of when the topic comes up.
+
+  5. Political landscape summary — 1-paragraph overview of the
+     commission/council dynamic, key allies, key skeptics. Useful for
+     Emily to know who Greg might mention in the meeting.
+
+  6. Tailored discovery questions — 3-7 questions, each specific to
+     this person and this project. Each question must include a
+     rationale (one sentence on why this question for this person).
+
+  7. Custom C-HAWQ intro — exactly 2 sentences introducing C-HAWQ,
+     tuned for the audience. An engineer hears C-HAWQ differently than
+     a city manager differently than a nonprofit director.
+
+  Return as a ResearchBrief with findings.research_type = "S3-PREP".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    research_type_id: S3-PREP
+    chunk_type: ai_prompt
+    limit: 1
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 3
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "linkedin.com"
+
+evals:
+  golden_cases_file: evals/research_agent/S3-PREP/golden.jsonl
+  min_pass_rate: 0.85

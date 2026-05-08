@@ -1,0 +1,105 @@
+id: S1-2
+name: LinkedIn Research
+version: 1
+binder_anchor: ppb_S01_s1_2_linkedin_research
+description: >
+  Lighter, LinkedIn-focused contact research. Manual trigger when Emily wants
+  to send a LinkedIn connection request before email. Focused on the
+  mechanics of the connection — common ground hooks, environmental signals
+  in the profile, the 300-char connection request message, and a follow-up.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 4000
+
+inputs:
+  required:
+    - name: contact_name
+      source: manual.contact_name
+    - name: contact_title
+      source: manual.contact_title
+    - name: organization
+      source: manual.organization
+  optional:
+    - name: linkedin_profile_text
+      source: manual.linkedin_profile_text
+      description: "Pasted LinkedIn profile content if Emily already grabbed it"
+    - name: linkedin_url
+      source: manual.linkedin_url
+
+system: |
+  You are C-HAWQ's Research Agent in LinkedIn-prep mode. Your job is to
+  produce the materials Emily needs to send a high-quality LinkedIn
+  connection request — a request that gets accepted at significantly above
+  the baseline rate because it references something specific.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM if linkedin_profile_text
+    isn't already provided.
+  - LinkedIn often blocks anonymous fetches. If web_fetch fails, search for
+    publicly-quoted statements or articles featuring the contact instead.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S1-2".
+  - connection_request_message MUST be ≤ 300 characters (LinkedIn limit).
+  - The message must reference something specific — a project, panel, post,
+    publication. Generic networking copy is unacceptable.
+  - The follow-up should be sent only if no reply within 7-10 days.
+
+user: |
+  Prepare a LinkedIn connection request for:
+
+  - Name: {{ contact_name }}
+  - Title: {{ contact_title }}
+  - Organization: {{ organization }}
+  {%- if linkedin_url %}
+  - Profile: {{ linkedin_url }}
+  {%- endif %}
+
+  {% if linkedin_profile_text -%}
+  Profile content provided:
+  {{ linkedin_profile_text }}
+  {%- endif %}
+
+  Surface:
+
+  1. Common ground hooks — shared interests, mutual connections, similar
+     professional experiences, or any documented environmental advocacy.
+     At least one is required.
+
+  2. Environmental signals in their profile or public activity — anything
+     suggesting they care about water quality, habitat, coastal resilience,
+     or related issues.
+
+  3. The connection request message itself — under 300 characters, friendly
+     but professional, references something specific, ends with an implicit
+     reason to accept.
+
+  4. The follow-up message to send 7-10 days after the connection if they
+     haven't replied — slightly longer than the connection message,
+     proposes a specific next step (15-min call, in-person at upcoming
+     event, Google Meet).
+
+  Return as a ResearchBrief with findings.research_type = "S1-2".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    research_type_id: S1-2
+    chunk_type: ai_prompt
+    limit: 1
+  external:
+    enabled_sources:
+      - "linkedin.com"
+      - "*.fl.gov"
+      - "*.gov"
+
+evals:
+  golden_cases_file: evals/research_agent/S1-2/golden.jsonl
+  min_pass_rate: 0.80

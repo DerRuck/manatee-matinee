@@ -1,0 +1,125 @@
+id: S4-DECK
+name: Custom Deck Research Brief
+version: 1
+binder_anchor: ppb_S04_s4_deck_research_brief
+description: >
+  Source brief that feeds Step 4 presentation deck creation. Auto-fires
+  when a Go decision is recorded and the project advances to Step 4.
+  Outputs satellite imagery sources, localized environmental data,
+  comparable Florida project examples, human-scale statistics, and
+  visual storytelling suggestions. Not a deck — the source material a
+  deck creator (currently Ryan, eventually a Presentation Agent) builds
+  the deck from.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 12000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: project_focus
+      source: ghl.project.focus
+      example: "Naples Bay seagrass restoration"
+    - name: problem_areas
+      source: ghl.project.problem_areas
+      description: "List of waterbodies, neighborhoods, or specific sites identified in intake"
+  optional:
+    - name: champion_priorities
+      source: ghl.contact.champion_priorities
+    - name: project_overview
+      source: ghl.project.overview
+
+system: |
+  You are C-HAWQ's Research Agent in deck-prep mode. The output of this
+  prompt is NOT a deck — it's the source brief that whoever creates the
+  deck (currently Ryan, eventually the Presentation Agent) draws from.
+
+  C-HAWQ's decks are visual-first. They show the problem with imagery,
+  ground it in specific data for THIS municipality (not generic Florida
+  averages), reference comparable projects elsewhere in Florida that
+  succeeded, translate technical metrics into human-scale impact
+  ("18 acres of seagrass = habitat for 4 million blue crabs"), and
+  suggest specific visual concepts the deck creator can build into slides.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM aggressively.
+  - For satellite imagery: search Google Earth, USGS Earth Explorer,
+    Sentinel Hub, NOAA Digital Coast for the specific waterbodies named.
+  - For localized data: hit FDEP fldatamart, SFWMD/SWFWMD water quality
+    portals, USGS water data, NOAA estuarine reserves.
+  - For comparable projects: search FDEP funded project lists, SFWMD
+    SWIM project archive, RESTORE Council awards, NOAA habitat
+    restoration project pages.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S4-DECK".
+  - comparable_project_examples MUST be 1-5 examples, all Florida-based,
+    all with cited sources.
+  - human_scale_statistics: each must include the human-scale framing
+    AND the technical metric it translates.
+  - visual_storytelling_suggestions: 2-8 concepts; each tied to specific
+    data or imagery, not generic ("show before and after").
+
+user: |
+  Build the source brief for a Step 4 presentation deck:
+
+  - Municipality: {{ municipality_name }}
+  - Project focus: {{ project_focus }}
+  - Problem areas: {{ problem_areas }}
+  {%- if champion_priorities %}
+  - Champion priorities: {{ champion_priorities }}
+  {%- endif %}
+  {%- if project_overview %}
+  - Project overview: {{ project_overview }}
+  {%- endif %}
+
+  Surface:
+
+  1. Satellite imagery sources — for each problem area or waterbody:
+     imagery provider, URL, suggested view (coords, zoom, date range).
+     Aim for 2-5 entries.
+
+  2. Localized environmental data — specific metric, value, location,
+     year, plain-English interpretation. Aim for 3-7 data points.
+     ALL must be specific to this municipality, not Florida averages.
+
+  3. Comparable project examples — 1-5 Florida-based projects similar
+     to this one, with year, cost, outcome, why-relevant note, and
+     visual asset URL if available.
+
+  4. Human-scale statistics — translate technical metrics into something
+     a non-expert audience emotionally connects with. Each statistic
+     must include the framing AND a citation for the underlying number.
+
+  5. Visual storytelling suggestions — 2-8 specific slide concepts the
+     deck creator can build into visuals, each tied to specific data,
+     imagery, or comparables surfaced above.
+
+  Return as a ResearchBrief with findings.research_type = "S4-DECK".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    research_type_id: S4-DECK
+    chunk_type: ai_prompt
+    limit: 1
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "fldatamart.org"
+      - "earth.google.com"
+      - "earthexplorer.usgs.gov"
+      - "*.edu"
+
+evals:
+  golden_cases_file: evals/research_agent/S4-DECK/golden.jsonl
+  min_pass_rate: 0.80

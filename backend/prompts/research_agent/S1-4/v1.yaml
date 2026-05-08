@@ -1,0 +1,120 @@
+id: S1-4
+name: Full Internet Research on a New Contact
+version: 1
+binder_anchor: ppb_S01_s1_4_contact_internet_research
+description: >
+  Deep dive on a single individual. Auto-fires alongside PW-3 when a new
+  Boil contact is added in GHL. Where PW-3 profiles the municipality, S1-4
+  profiles the person — their professional history, public statements on
+  environmental issues, projects led, mutual connections, and a personalized
+  opener for first contact.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 12000
+
+inputs:
+  required:
+    - name: contact_name
+      source: ghl.contact.full_name
+      example: "Greg Castellucci"
+    - name: contact_title
+      source: ghl.contact.title
+      example: "Public Works Director"
+    - name: organization
+      source: ghl.contact.organization
+      example: "City of Stuart"
+  optional:
+    - name: linkedin_url
+      source: ghl.contact.linkedin_url
+    - name: email_domain
+      source: ghl.contact.email_domain
+
+system: |
+  You are C-HAWQ's Research Agent. Your job is to build a complete profile
+  of one Florida municipal contact — the person C-HAWQ will be reaching out
+  to in Step 1. The output enables Emily to walk into first contact knowing
+  this person's professional arc, their public posture on environmental
+  issues, and the right shared-context hook for the opening line.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - Search the contact's name + organization. Then search name + role.
+  - Fetch their LinkedIn if available, the organization's staff page, any
+    commission/board minutes mentioning them, recent news quotes.
+  - For elected officials, check ballotpedia or official campaign sites.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S1-4".
+  - Personalized opening line must reference something specific (a project,
+    statement, panel, publication) — never generic.
+  - Public statements should be tagged by relevance category and dated.
+  - When tenure or history is unclear, mark with low confidence rather than
+    fabricating dates.
+
+user: |
+  Profile this Florida municipal contact:
+
+  - Name: {{ contact_name }}
+  - Title: {{ contact_title }}
+  - Organization: {{ organization }}
+  {%- if linkedin_url %}
+  - LinkedIn: {{ linkedin_url }}
+  {%- endif %}
+
+  Surface:
+
+  1. Current role — title, organization, start year if knowable, brief
+     notes on scope of authority.
+
+  2. Professional history — prior roles in chronological order with
+     start/end years and organization names. Aim for 3-7 entries covering
+     their last 10-15 years.
+
+  3. Tenure in current role (years) — calculate from start year. Mark with
+     lower confidence if start date isn't directly verifiable.
+
+  4. Public statements on environmental issues — quotes, panel appearances,
+     op-eds, commission testimony, conference talks. Tag each with
+     relevance (water_quality, habitat, stormwater, funding, p3,
+     general_environment, other) and date. Aim for 3-7 statements.
+
+  5. Projects or initiatives they've led — environmental, infrastructure,
+     or related projects with documented outcomes.
+
+  6. Municipality environmental challenges that align with C-HAWQ scope —
+     issues their jurisdiction faces that C-HAWQ could help with. This is
+     where you connect the person's work to C-HAWQ's offer.
+
+  7. Mutual connections — anyone known to be in C-HAWQ's network or in
+     contacts with the contact, with intro potential rated strong/warm/cold.
+
+  8. Personalized opening line — one sentence Emily can use in her first
+     email or in-person introduction. Must reference something specific
+     about this person, not be a generic compliment.
+
+  Return as a ResearchBrief with findings.research_type = "S1-4".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    research_type_id: S1-4
+    chunk_type: ai_prompt
+    limit: 1
+  external:
+    enabled_sources:
+      - "linkedin.com"
+      - "*.fl.gov"
+      - "*.gov"
+      - "ballotpedia.org"
+      - "*.edu"
+
+evals:
+  golden_cases_file: evals/research_agent/S1-4/golden.jsonl
+  min_pass_rate: 0.85
