@@ -1,5 +1,6 @@
 import os
 import re
+import html
 import datetime
 import requests
 import google.auth
@@ -49,16 +50,30 @@ def get_services():
 
 
 def extract_body(msg_data):
-    payload = msg_data.get('payload', {})
-    parts = payload.get('parts', [])
-
-    for part in parts:
-        if part['mimeType'] == 'text/plain':
-            data = part['body'].get('data')
+    body_parts = {'text/plain': '', 'text/html': ''}
+    
+    # Start our stack with the top-level payload
+    stack = [msg_data.get('payload', {})]
+    while stack:
+        part = stack.pop()
+        mime_type = part.get('mimeType')
+        
+        # If text, decode and save it
+        if mime_type in ['text/plain', 'text/html']:
+            data = part.get('body', {}).get('data')
             if data:
-                return base64.urlsafe_b64decode(data).decode()
-
-    return msg_data.get('snippet', '')
+                decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                body_parts[mime_type] += decoded
+                
+        if 'parts' in part:
+            stack.extend(reversed(part['parts']))
+    
+    if body_parts['text/plain']:
+        return body_parts['text/plain']
+    elif body_parts['text/html']:
+        return body_parts['text/html']
+    else:
+        return msg_data.get('snippet', '')
 
 def process_inbox(event, context):
 
@@ -77,14 +92,19 @@ def process_inbox(event, context):
         msg_data = gmail.users().messages().get(userId='me', id=msg['id']).execute()
         # body = msg_data.get('snippet', '')
         body = extract_body(msg_data)
+        # 1. Get the full, un-truncated body
+        raw_body = extract_body(msg_data)
+        body = html.unescape(raw_body)
+        all_links = re.findall(r'(https?://[^\s"\'<>]+)', body)
         
-        # 2. Extract the iFlytek URL using Regex
-        url_match = re.search(r'https://share-ap1\.theainote\.com/note-share/fusion\?shareId=[a-zA-Z0-9]+', body)
-        
-        if url_match:
-            share_url = url_match.group(0)
-            print(f"Found URL: {share_url}")
-            
+        share_url = None
+        for link in all_links:
+            if "share-ap1.theainote.com" in link:
+                share_url = link
+                print(f"Found URL: {share_url}")
+                break 
+                
+        if share_url:
             # 3. Scrape and Upload
             success = scrape_and_upload(share_url, drive)
             
