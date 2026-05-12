@@ -144,7 +144,7 @@ def find_or_create_folder(name: str, parent_folder_id: str) -> str:
         "drive folder created",
         extra={
             "folder_id": response["id"],
-            "name": name,
+            "folder_name": name,
             "parent_folder_id": parent_folder_id,
         },
     )
@@ -212,7 +212,7 @@ def list_folder_files(
                 q=f"'{folder_id}' in parents and trashed = false",
                 fields=(
                     "nextPageToken, "
-                    "files(id, name, mimeType, modifiedTime, webViewLink, parents)"
+                    "files(id, name, mimeType, modifiedTime, webViewLink, parents, size)"
                 ),
                 pageSize=page_size,
                 pageToken=page_token,
@@ -381,7 +381,7 @@ def download_file_as_text(
     ):
         logger.info(
             "drive download skip — non-text mime type",
-            extra={"file_id": file_id, "mime_type": mime_type, "name": file_name},
+            extra={"file_id": file_id, "mime_type": mime_type, "file_name": file_name},
         )
         return None
 
@@ -401,7 +401,7 @@ def download_file_as_text(
             if ext not in {"md", "markdown", "txt"}:
                 logger.info(
                     "drive download skip — octet-stream with non-text extension",
-                    extra={"file_id": file_id, "name": file_name, "ext": ext},
+                    extra={"file_id": file_id, "file_name": file_name, "ext": ext},
                 )
                 return None
         return _download_bytes(service, file_id).decode("utf-8", errors="replace")
@@ -414,7 +414,7 @@ def download_file_as_text(
 
     logger.info(
         "drive download skip — unsupported mime type",
-        extra={"file_id": file_id, "mime_type": mime_type, "name": file_name},
+        extra={"file_id": file_id, "mime_type": mime_type, "file_name": file_name},
     )
     return None
 
