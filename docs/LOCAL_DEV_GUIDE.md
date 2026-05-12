@@ -227,16 +227,29 @@ pytest -q
 
 Same command in PowerShell. Smoke tests should pass on a fresh checkout. Run this before any push — CI/CD runs the same suite, and a red local pytest means a red pipeline.
 
-### Vector ingest TODO
+### Vector ingest
 
-The corpus ingest is a one-shot CLI:
+The corpus ingest is a one-shot CLI. Each run targets one **source** under the AI Infrastructure root folder; layout and metadata rules differ per source.
 
 ```bash
 cd backend
-python -m scripts.ingest_demo_corpus --folder-id <DRIVE_FOLDER_ID>
+python -m scripts.ingest_demo_corpus --folder-id <AI_INFRA_FOLDER_ID> --source <name>
 ```
 
-Same command in PowerShell. The folder must follow the `<municipality>/<document_type>/file` layout — see `scripts/ingest_demo_corpus.py` for the maps. To smoke-test a vector query against ingested content:
+Same command in PowerShell. `--source` picks the subfolder to crawl:
+
+| `--source` | Drive subfolder | What gets ingested |
+|---|---|---|
+| `plaud` | `Plaud Files` | Google Doc transcripts only (skip raw JSON, audio, sentinels) |
+| `leads` | `Leads` | docx/PDF; type from filename (Mail/Letter/Notes/Prep/else=other); municipality from subfolder |
+| `industry_context` | `Industry Context` | docx/PDF; External Context = research_report, What is C-HAWQ = internal_policy |
+| `email` | `Email data` | `.txt` = email body, PDF/docx attachments = other; other types skipped |
+| `iflytek` | `Iflytek Files` | PDFs only (the `.txt` sidecars are 0 bytes); municipality from filename |
+| `all` | every above | walks each in turn, same rules |
+
+Re-running is idempotent: each Drive file ID maps to a fixed Document ID, and chunks for that document are deleted then rewritten. Per-source resolvers live in `scripts/ingest_demo_corpus.py`; the municipality keyword map (`KNOWN_MUNICIPALITY_SLUGS`) is the single place to add a new pilot.
+
+To smoke-test a vector query against ingested content:
 
 ```bash
 python -m scripts.test_vector_query --query "what concerns came up about dredging?"

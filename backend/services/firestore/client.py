@@ -73,6 +73,28 @@ def put_document(document: Document) -> None:
     client.collection(collection).document(document.document_id).set(record)
 
 
+def get_document_state(document_id: str) -> dict[str, Any] | None:
+    """
+    Cheap read of a `documents`-collection row, returned as a raw dict.
+
+    Used by the ingest script to decide whether a file has already been
+    fully ingested at its current `drive_modified_time` so it can skip the
+    download + chunk + embed cycle. Returns None if no row exists.
+
+    Kept dict-shaped on purpose — we don't want to reconstruct a full
+    Document model just to read two fields, and partial rows (status=
+    "processing", missing optional fields) shouldn't fail Pydantic
+    validation.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_documents_collection
+    snap = client.collection(collection).document(document_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
 def put_chunks_bulk(chunks: Iterable[Chunk], batch_size: int = 400) -> int:
     """
     Write many chunks at once. Embeddings are wrapped in firestore.Vector so
