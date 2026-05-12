@@ -19,13 +19,13 @@ inputs:
   required:
     - name: contact_name
       source: ghl.contact.full_name
-      example: "Greg Castellucci"
+      example: "Alex Rivera"
     - name: contact_title
       source: ghl.contact.title
       example: "Public Works Director"
     - name: organization
       source: ghl.contact.organization
-      example: "City of Stuart"
+      example: "City of Sample"
   optional:
     - name: linkedin_url
       source: ghl.contact.linkedin_url
@@ -104,9 +104,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: S1-4
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   external:
     enabled_sources:
       - "linkedin.com"

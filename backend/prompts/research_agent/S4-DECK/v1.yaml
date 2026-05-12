@@ -23,7 +23,7 @@ inputs:
       source: ghl.contact.municipality_name
     - name: project_focus
       source: ghl.project.focus
-      example: "Naples Bay seagrass restoration"
+      example: "Sample Bay seagrass restoration"
     - name: problem_areas
       source: ghl.project.problem_areas
       description: "List of waterbodies, neighborhoods, or specific sites identified in intake"
@@ -108,9 +108,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: S4-DECK
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   external:
     enabled_sources:
       - "*.fl.gov"

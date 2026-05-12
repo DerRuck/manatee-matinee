@@ -6,8 +6,8 @@ Run from the repo root (not backend/):
     # PW-3 municipality background (default contact: stuart_pw3)
     python -m backend.scripts.run_research_agent PW-3
 
-    # S6-1 grant research for Naples seagrass
-    python -m backend.scripts.run_research_agent S6-1 --contact naples_seagrass
+    # S6-1 grant research for a seagrass project
+    python -m backend.scripts.run_research_agent S6-1 --contact sample_seagrass
 
     # Save the brief as JSON
     python -m backend.scripts.run_research_agent PW-3 --save brief.json
@@ -16,10 +16,10 @@ Run from the repo root (not backend/):
     python -m backend.scripts.run_research_agent S6-1 --model claude-haiku-4-5-20251001
 
     # Skip web search (faster, uses training data only)
-    python -m backend.scripts.run_research_agent S3-PREP --contact stuart_intake --no-web-search
+    python -m backend.scripts.run_research_agent S3-PREP --contact sample_intake --no-web-search
 
     # Skip Drive upload
-    python -m backend.scripts.run_research_agent LOBBY-1 --contact martin_lobby --no-drive
+    python -m backend.scripts.run_research_agent LOBBY-1 --contact sample_lobby --no-drive
 
 Run from backend/ with pytest-style path instead:
     cd backend && python scripts/run_research_agent.py PW-3
@@ -53,61 +53,61 @@ from services.research_agent.schema import ResearchBrief
 
 SAMPLE_CONTACTS: dict[str, dict] = {
     # ---- S6-1 — Grant Opportunity Research ----
-    "naples_seagrass": {
-        "contact_id": "ghl_test_naples_001",
-        "municipality_name": "Naples",
-        "county": "Collier",
+    "sample_seagrass": {
+        "contact_id": "ghl_test_001",
+        "municipality_name": "Sarasota",
+        "county": "Sarasota",
         "project_type": "seagrass_restoration",
         "estimated_cost_usd": 4_400_000,
         "project_overview": (
             "Restore approximately 18 acres of historical seagrass habitat in "
-            "Naples Bay using nature-based shoreline stabilization and water "
+            "Sarasota Bay using nature-based shoreline stabilization and water "
             "quality improvements at three identified problem zones."
         ),
         "p3_intent": "yes",
         "timeline": "Q1 2027",
     },
-    "stpete_stormwater": {
-        "contact_id": "ghl_test_stpete_001",
-        "municipality_name": "St. Petersburg",
-        "county": "Pinellas",
+    "sample_stormwater": {
+        "contact_id": "ghl_test_002",
+        "municipality_name": "Bradenton",
+        "county": "Manatee",
         "project_type": "stormwater_retrofit",
         "estimated_cost_usd": 12_500_000,
         "project_overview": (
-            "Convert three sub-basins in southwest St. Pete from grey to green "
-            "stormwater infrastructure to reduce nitrogen loading into Boca "
-            "Ciega Bay and address recurring flood complaints."
+            "Convert three sub-basins from grey to green stormwater "
+            "infrastructure to reduce nitrogen loading into Tampa Bay "
+            "and address recurring flood complaints."
         ),
         "p3_intent": "exploring",
     },
 
     # ---- PW-3 — Municipality Background Research ----
-    "stuart_pw3": {
-        "contact_id": "ghl_test_stuart_001",
-        "municipality_name": "Stuart",
-        "county": "Martin",
+    "sample_pw3": {
+        "contact_id": "ghl_test_003",
+        "municipality_name": "Gainesville",
+        "county": "Alachua",
         "state": "FL",
-        "contact_name": "Greg Castellucci",
+        "contact_name": "Alex Rivera",
         "contact_title": "Public Works Director",
     },
-    "fortmyers_pw3": {
-        "contact_id": "ghl_test_fortmyers_001",
-        "municipality_name": "Fort Myers",
-        "county": "Lee",
+    "sample_pw3_b": {
+        "contact_id": "ghl_test_004",
+        "municipality_name": "Lakeland",
+        "county": "Polk",
         "state": "FL",
     },
 
     # ---- LOBBY-1 — Lobbyist Registration ----
-    "martin_lobby": {
-        "contact_id": "ghl_test_martin_lobby_001",
-        "municipality_name": "Martin County",
-        "jurisdiction_name": "Martin County",
+    "sample_lobby": {
+        "contact_id": "ghl_test_005",
+        "municipality_name": "Alachua County",
+        "jurisdiction_name": "Alachua County",
         "jurisdiction_type": "county",
     },
-    "stuart_lobby": {
-        "contact_id": "ghl_test_stuart_lobby_001",
-        "municipality_name": "Stuart",
-        "jurisdiction_name": "City of Stuart",
+    "sample_lobby_city": {
+        "contact_id": "ghl_test_006",
+        "municipality_name": "Gainesville",
+        "jurisdiction_name": "City of Gainesville",
         "jurisdiction_type": "city",
     },
 
@@ -117,62 +117,62 @@ SAMPLE_CONTACTS: dict[str, dict] = {
         "municipality_name": None,
         "conference_name": "FSBPA 2026 Annual Conference",
         "conference_date": "2026-09-15",
-        "location": "West Palm Beach, FL",
+        "location": "Florida",
     },
 
     # ---- S1-4 — Full Internet Research on a Contact ----
-    "castellucci_s14": {
-        "contact_id": "ghl_test_stuart_001",
-        "municipality_name": "Stuart",
-        "contact_name": "Greg Castellucci",
+    "sample_s14": {
+        "contact_id": "ghl_test_003",
+        "municipality_name": "Gainesville",
+        "contact_name": "Alex Rivera",
         "contact_title": "Public Works Director",
-        "organization": "City of Stuart",
+        "organization": "City of Gainesville",
     },
 
     # ---- S1-2 — LinkedIn Research ----
-    "castellucci_linkedin": {
-        "contact_id": "ghl_test_stuart_001",
-        "municipality_name": "Stuart",
-        "contact_name": "Greg Castellucci",
+    "sample_linkedin": {
+        "contact_id": "ghl_test_003",
+        "municipality_name": "Gainesville",
+        "contact_name": "Alex Rivera",
         "contact_title": "Public Works Director",
-        "organization": "City of Stuart",
+        "organization": "City of Gainesville",
     },
 
     # ---- S3-PREP — Pre-Meeting Research Package ----
-    "stuart_intake": {
-        "contact_id": "ghl_test_stuart_001",
-        "municipality_name": "Stuart",
-        "county": "Martin",
-        "contact_name": "Greg Castellucci",
+    "sample_intake": {
+        "contact_id": "ghl_test_003",
+        "municipality_name": "Gainesville",
+        "county": "Alachua",
+        "contact_name": "Alex Rivera",
         "contact_title": "Public Works Director",
         "meeting_date": "2026-05-26",
         "project_hint": (
-            "St. Lucie River stormwater retrofit; Greg flagged in the booth "
-            "conversation that the project has been stalled in FDEP discussions "
-            "for two years."
+            "Stormwater retrofit along Hogtown Creek; contact flagged in the "
+            "booth conversation that the project has been stalled in FDEP "
+            "discussions for two years."
         ),
     },
 
     # ---- S3-3 — Commission Meeting Preparation ----
-    "stuart_commission_2026_06": {
-        "contact_id": "ghl_test_stuart_001",
-        "municipality_name": "Stuart",
+    "sample_commission": {
+        "contact_id": "ghl_test_003",
+        "municipality_name": "Gainesville",
         "meeting_date": "2026-06-09",
         "meeting_goal": "observe",
         "project_status": (
-            "Pre-Step-3 — Greg has agreed to an intake meeting but no formal "
+            "Pre-Step-3 — contact has agreed to an intake meeting but no formal "
             "C-HAWQ proposal in front of the commission yet."
         ),
     },
 
     # ---- S4-DECK — Custom Deck Research Brief ----
-    "naples_seagrass_deck": {
-        "contact_id": "ghl_test_naples_001",
-        "municipality_name": "Naples",
-        "project_focus": "Naples Bay seagrass restoration",
+    "sample_seagrass_deck": {
+        "contact_id": "ghl_test_001",
+        "municipality_name": "Sarasota",
+        "project_focus": "Sarasota Bay seagrass restoration",
         "problem_areas": (
-            "Naples Bay — three identified problem zones near Crayton Cove, "
-            "Doctors Pass, and the upstream basin near Gordon River outflow."
+            "Sarasota Bay — three identified problem zones along the shoreline "
+            "with documented seagrass loss since 2018."
         ),
         "champion_priorities": (
             "Visible early wins, P3 funding structure, demonstrating to "
@@ -227,7 +227,6 @@ def print_brief_summary(brief: ResearchBrief) -> None:
         print(f"  Timing: {f.timing_requirement}")
     elif f.research_type == "PW-1":
         print(f"  Priority contacts: {len(f.top_priority_contacts)}")
-        print(f"  Sessions: {len(f.sessions_to_attend)}")
     elif f.research_type == "S1-2":
         print(f"  Contact: {f.contact_name}")
         print(f"  Common ground hooks: {len(f.common_ground_hooks)}")
@@ -279,15 +278,15 @@ def main() -> None:
 
     # Pick a sensible default contact for the type if none specified
     type_defaults = {
-        "S6-1": "naples_seagrass",
-        "PW-3": "stuart_pw3",
+        "S6-1": "sample_seagrass",
+        "PW-3": "sample_pw3",
         "PW-1": "fsbpa_2026",
-        "LOBBY-1": "martin_lobby",
-        "S1-2": "castellucci_linkedin",
-        "S1-4": "castellucci_s14",
-        "S3-3": "stuart_commission_2026_06",
-        "S3-PREP": "stuart_intake",
-        "S4-DECK": "naples_seagrass_deck",
+        "LOBBY-1": "sample_lobby",
+        "S1-2": "sample_linkedin",
+        "S1-4": "sample_s14",
+        "S3-3": "sample_commission",
+        "S3-PREP": "sample_intake",
+        "S4-DECK": "sample_seagrass_deck",
     }
     contact_key = args.contact or type_defaults.get(args.research_type, "stuart_pw3")
     contact = SAMPLE_CONTACTS[contact_key]

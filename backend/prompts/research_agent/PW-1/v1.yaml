@@ -4,16 +4,15 @@ version: 1
 binder_anchor: ppb_PRE_pw_1_conference_attendee_research
 description: >
   Pre-event research that maps a conference's attendee list to C-HAWQ's
-  ideal contact profile. Surfaces 10-15 priority targets, suggests sessions
-  to attend, identifies referral partner candidates, and drafts cold
-  outreach emails to send before the event. Manual trigger — Emily fires
-  this 7-14 days before any conference.
+  ideal contact profile. Surfaces the top 5 priority targets with
+  personalized openers for each. Manual trigger — Emily fires this
+  7-14 days before any conference.
 
 model:
   provider: anthropic
   name: claude-sonnet-4-6
   temperature: 0.4
-  max_tokens: 12000
+  max_tokens: 6000
 
 inputs:
   required:
@@ -67,11 +66,9 @@ system: |
   Output rules — non-negotiable:
   - Return a single ResearchBrief JSON object. NO prose outside the JSON.
   - findings.research_type MUST be "PW-1".
-  - Top priority list must be 10-15 contacts, ranked.
+  - Top priority list must be exactly 5 contacts, ranked.
   - Every priority contact must have a personalized opener — generic openers
     ("Nice to meet you") are unacceptable.
-  - Pre-conference outreach drafts should reference something specific about
-    the contact's work, not just be templated.
 
 user: |
   Conference: {{ conference_name }}
@@ -97,24 +94,10 @@ user: |
 
   Surface:
 
-  1. Top 10-15 priority contacts ranked by relevance to C-HAWQ. For each:
+  1. Top 5 priority contacts ranked by relevance to C-HAWQ. For each:
      name, title, organization, why prioritized, relevance level
      (high/medium/low), one-sentence personalized opener referencing
      something specific to them.
-
-  2. Sessions Emily should attend — sessions where priority contacts will
-     be present, OR sessions covering topics that signal lead-quality
-     attendees (Florida stormwater, P3 financing, coastal resilience,
-     habitat restoration funding).
-
-  3. Referral partner candidates — engineering firms, nonprofits, academic
-     researchers, or other organizations that could send qualified leads
-     to C-HAWQ. Distinct from direct leads.
-
-  4. Pre-conference outreach drafts — short cold-email templates for the
-     top 3-5 priority contacts to send 5-7 days before the event proposing
-     a brief meeting on-site. Each should reference the specific contact's
-     work, not be templated.
 
   Return as a ResearchBrief with findings.research_type = "PW-1".
 
@@ -124,9 +107,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: PW-1
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   external:
     enabled_sources:
       - "*.fl.gov"

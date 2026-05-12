@@ -33,7 +33,7 @@ from typing import Iterable
 
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "chawq-manatee-matinee")
 LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")
-COLLECTION = "vector_chunks"
+COLLECTION = "chunks"
 SOURCE_DOC = "proven_process_binder"
 EMBEDDING_MODEL = "text-embedding-004"
 EMBEDDING_DIM = 768

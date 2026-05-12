@@ -35,7 +35,7 @@ from jinja2 import Template
 
 from services.research_agent.schema import ResearchBrief, json_schema_for_type
 
-BINDER_COLLECTION = "vector_chunks"
+BINDER_COLLECTION = "chunks"
 
 
 # ---------------------------------------------------------------------------
@@ -96,15 +96,16 @@ def retrieve_binder_context(cfg: dict) -> str:
 
     try:
         db = firestore.Client(project=project)
-        docs = list(
-            db.collection(BINDER_COLLECTION)
-              .where(filter=FieldFilter("source_doc", "==", primary["source_doc"]))
-              .where(filter=FieldFilter("research_type_id", "==", primary["research_type_id"]))
-              .where(filter=FieldFilter("chunk_type", "==", primary["chunk_type"]))
-              .limit(primary.get("limit", 1))
-              .stream()
+        q = db.collection(BINDER_COLLECTION).where(
+            filter=FieldFilter("source_doc", "==", primary["source_doc"])
         )
-        return docs[0].to_dict()["text"] if docs else ""
+        if "research_type_id" in primary:
+            q = q.where(filter=FieldFilter("research_type_id", "==", primary["research_type_id"]))
+        if "chunk_type" in primary:
+            q = q.where(filter=FieldFilter("chunk_type", "==", primary["chunk_type"]))
+        docs = list(q.limit(primary.get("limit", 5)).stream())
+        texts = [d.to_dict()["text"] for d in docs if d.to_dict().get("text")]
+        return "\n\n---\n\n".join(texts)
     except Exception:
         return ""
 

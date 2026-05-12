@@ -16,7 +16,7 @@ class ResearchAgent:
 
     Usage:
         agent = ResearchAgent("PW-3")
-        brief, meta = agent.run({"municipality_name": "Stuart", "county": "Martin"})
+        brief, meta = agent.run({"municipality_name": "Sample City", "county": "Sample"})
     """
 
     def __init__(self, research_type: str, version: int = 1) -> None:

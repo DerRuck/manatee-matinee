@@ -19,7 +19,7 @@ inputs:
   required:
     - name: jurisdiction_name
       source: ghl.contact.municipality_name
-      example: "Martin County"
+      example: "Sample County"
     - name: jurisdiction_type
       source: ghl.contact.jurisdiction_type
       enum: [city, county, wmd, state]
@@ -101,9 +101,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: LOBBY-1
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   binder_supplement:
     source_doc: proven_process_binder
     section: "SECTION 3B"

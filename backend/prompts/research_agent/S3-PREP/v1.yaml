@@ -100,7 +100,7 @@ user: |
 
   5. Political landscape summary — 1-paragraph overview of the
      commission/council dynamic, key allies, key skeptics. Useful for
-     Emily to know who Greg might mention in the meeting.
+     the team to know who the contact might mention in the meeting.
 
   6. Tailored discovery questions — 3-7 questions, each specific to
      this person and this project. Each question must include a
@@ -118,9 +118,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: S3-PREP
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   binder_supplement:
     source_doc: proven_process_binder
     step: 3

@@ -30,7 +30,7 @@ inputs:
   required:
     - name: municipality_name
       source: ghl.contact.municipality_name
-      example: "Naples"
+      example: "Sample City"
     - name: county
       source: ghl.contact.county
       example: "Collier"
@@ -147,9 +147,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: S6-1
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   binder_supplement:
     source_doc: proven_process_binder
     step: 6

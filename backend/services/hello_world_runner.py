@@ -207,7 +207,7 @@ _FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def _build_drive_filename(payload: dict[str, Any], contact_id: str) -> str:
     """
-    Return a filesystem-safe filename like `Naples_Test-User_2026-04-29T15-32-24Z.md`.
+    Return a filesystem-safe filename like `SampleCity_Test-User_2026-04-29T15-32-24Z.md`.
     Falls back to contact_id when name fields are missing.
     """
     parts: list[str] = []

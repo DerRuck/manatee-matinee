@@ -21,11 +21,11 @@ agent = HelloWorldAgent()
 result = agent.run(
     "Write a brief summary for outreach purposes.",
     context={
-        "municipality": "Rookery Bay National Estuarine Research Reserve",
+        "municipality": "Sample Coastal Reserve",
         "state": "Florida",
-        "contact": "Reserve Manager, Collier County",
+        "contact": "Reserve Manager, Sample County",
         "notes": (
-            "Manages 110,000 acres of mangrove estuary near Naples; "
+            "Manages 110,000 acres of mangrove estuary; "
             "key habitat for manatees, sea turtles, and shorebirds; "
             "active water quality monitoring program"
         ),

@@ -91,9 +91,7 @@ output_format: json
 retrieval:
   binder:
     source_doc: proven_process_binder
-    research_type_id: S1-2
-    chunk_type: ai_prompt
-    limit: 1
+    limit: 15
   external:
     enabled_sources:
       - "linkedin.com"

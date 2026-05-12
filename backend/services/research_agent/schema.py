@@ -288,28 +288,11 @@ class PriorityContact(BaseModel):
     sources: list[Source] = Field(min_length=1)
 
 
-class ConferenceSession(BaseModel):
-    title: str
-    presenter: str | None = None
-    time: str | None = None
-    why_attend: str
-    sources: list[Source] = Field(default_factory=list)
-
-
-class ReferralPartnerCandidate(BaseModel):
-    name_or_org: str
-    domain: str = Field(description="e.g., engineering firm, nonprofit, academic")
-    why_potential_partner: str
-    sources: list[Source] = Field(default_factory=list)
-
 
 class ConferenceAttendeeFindings(BaseModel):
     research_type: Literal["PW-1"] = "PW-1"
     conference_name: str
-    top_priority_contacts: list[PriorityContact] = Field(min_length=1, max_length=15)
-    sessions_to_attend: list[ConferenceSession] = Field(default_factory=list)
-    referral_partner_candidates: list[ReferralPartnerCandidate] = Field(default_factory=list)
-    pre_conference_outreach_drafts: list[str] = Field(default_factory=list)
+    top_priority_contacts: list[PriorityContact] = Field(min_length=1, max_length=5)
 
 
 # =============================================================================
