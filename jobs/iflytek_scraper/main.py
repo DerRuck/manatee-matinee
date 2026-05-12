@@ -28,6 +28,35 @@ SCOPES = [
 
 # --- Configuration END ---
 
+def transcribe_audio(audio_bytes):
+    aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
+    
+    transcriber = aai.Transcriber()
+    config = aai.TranscriptionConfig(
+        speech_models=["universal-3-pro", "universal-2"],
+        speaker_labels=True
+    )
+    
+    try:
+        transcript = transcriber.transcribe(audio_bytes, config=config)
+        if transcript.status == aai.TranscriptStatus.error:
+            if "credit" in transcript.error.lower():
+                error_msg = "ERROR: AssemblyAI Out of Credits"
+                print(error_msg)
+                return error_msg
+                
+            print(f"ERROR: AssemblyAI Error: {transcript.error}")
+            return "ERROR: Transcription completely failed."
+            
+        final_text = ""
+        for utterance in transcript.utterances:
+            final_text += f"Speaker {utterance.speaker}: {utterance.text}\n"
+            
+        return final_text
+    except Exception as e:
+        print(f"AssemblyAI Transcription Failed: {e}")
+        return "ERROR: Transcription completely failed."
+
 def get_services():
 
     base_creds, _ = google.auth.default()
@@ -159,6 +188,11 @@ def scrape_and_upload(url, drive_service):
             if audio_src:
                 r = requests.get(audio_src)
                 save_to_drive(r.content, f"{base_name}.opus", "audio/ogg", drive_service)
+                
+                # Transcribe audio
+                transcript_text = transcribe_audio(r.content)
+                if transcript_text:
+                    save_to_drive(transcript_text.encode('utf-8'), f"{base_name}_Transcript.txt", "text/plain", drive_service)
 
             # --- PDF & TXT ---
             page.wait_for_selector(".share-btn")
