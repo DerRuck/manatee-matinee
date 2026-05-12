@@ -145,7 +145,7 @@ class Result:
     error: str | None
 
 
-def run_one(research_type: str, contact: dict) -> Result:
+def run_one(research_type: str, contact: dict, web_search: bool = False) -> Result:
     from services.research_agent.runner import retrieve_binder_context, load_prompt
 
     yaml_path = _BACKEND / "prompts" / "research_agent" / research_type / "v1.yaml"
@@ -155,7 +155,7 @@ def run_one(research_type: str, contact: dict) -> Result:
     t0 = time.time()
     try:
         agent = ResearchAgent(research_type)
-        brief, meta = agent.run(contact, no_web_search=True, verbose=False)
+        brief, meta = agent.run(contact, no_web_search=not web_search, verbose=False)
         return Result(
             research_type=research_type,
             passed=True,
@@ -191,6 +191,8 @@ def main() -> None:
                     help="Drive folder ID (defaults to drive_sync.DEFAULT_FOLDER_ID)")
     ap.add_argument("--save-dir", metavar="DIR",
                     help="Save each passing brief as JSON in this local directory")
+    ap.add_argument("--web-search", action="store_true",
+                    help="Enable web_search and web_fetch tools (slower, billed)")
     args = ap.parse_args()
 
     if "ANTHROPIC_API_KEY" not in os.environ:
@@ -209,7 +211,7 @@ def main() -> None:
     results: list[Result] = []
     for research_type, contact in tests:
         print(f"{research_type:<12} {'running':<8}", end="", flush=True)
-        r = run_one(research_type, contact)
+        r = run_one(research_type, contact, web_search=args.web_search)
         results.append(r)
 
         status = "PASS" if r.passed else "FAIL"
