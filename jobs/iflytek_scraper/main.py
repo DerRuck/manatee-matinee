@@ -7,8 +7,7 @@ import google.auth
 from playwright.sync_api import sync_playwright
 from googleapiclient.discovery import build
 import base64
-# from google.oauth2 import service_account
-# from google.auth.transport.requests import Request
+import assemblyai as aai
 from google.auth import impersonated_credentials
 
 # --- Configuration ---
