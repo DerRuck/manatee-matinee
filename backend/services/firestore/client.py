@@ -20,6 +20,7 @@ import logging
 from typing import Any, Iterable
 
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.firestore_v1.vector import Vector
 
 from core.settings import Settings, get_settings
@@ -144,7 +145,7 @@ def delete_chunks_for_document(document_id: str, batch_size: int = 400) -> int:
     collection_name = settings.firestore_chunks_collection
     collection = client.collection(collection_name)
 
-    query = collection.where("document_id", "==", document_id)
+    query = collection.where(filter=FieldFilter("document_id", "==", document_id))
     deleted = 0
     batch = client.batch()
     in_batch = 0
@@ -162,6 +163,92 @@ def delete_chunks_for_document(document_id: str, batch_size: int = 400) -> int:
         batch.commit()
 
     return deleted
+
+
+def find_chunks_by_filters(
+    *,
+    contact_ids: Iterable[str] | None = None,
+    municipalities: Iterable[str] | None = None,
+    document_types: Iterable[str] | None = None,
+    data_sources: Iterable[str] | None = None,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """
+    Identity-filtered chunk retrieval for agent context assembly.
+
+    Pre-filtered vector search is the V1 retrieval strategy (locked
+    2026-04-23), but the Emailer's Simmer flow doesn't need a semantic
+    query — recent context about THIS contact is the right shape. So
+    this helper is the filter-only path: callers pass any combination of
+    contact_id, municipality, document_type, or data_source filters and
+    get back a bounded set of raw chunk dicts.
+
+    Filter semantics:
+      - Within one filter dimension, multiple values are an OR via
+        Firestore's `array-contains-any` (chunks store identity fields
+        as arrays, even when single-valued).
+      - Across dimensions, results are AND-ed.
+      - Firestore allows at most one `array-contains-any` per query, so
+        contact_ids and municipalities can't both be passed today; pick
+        the one that matches the V1 ingest reality (municipality, since
+        contact_id isn't populated yet).
+
+    Returns:
+        list of raw chunk dicts (Firestore document data). Empty list if
+        no chunks match. Order is whatever Firestore returns — V1
+        accepts that; recency ordering is a V2 enhancement once chunks
+        carry a denormalized ingested_at field.
+
+    Raises:
+        ValueError if both contact_ids and municipalities are passed
+        (Firestore can't do two array-contains-any in one query).
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = client.collection(settings.firestore_chunks_collection)
+
+    contact_list = list(contact_ids) if contact_ids else []
+    municipality_list = list(municipalities) if municipalities else []
+    if contact_list and municipality_list:
+        raise ValueError(
+            "Pass contact_ids OR municipalities, not both — Firestore "
+            "supports at most one array-contains-any per query."
+        )
+
+    query = collection
+    if contact_list:
+        query = query.where(
+            filter=FieldFilter("contact_id", "array_contains_any", contact_list)
+        )
+    elif municipality_list:
+        query = query.where(
+            filter=FieldFilter("municipality", "array_contains_any", municipality_list)
+        )
+
+    if document_types:
+        doc_type_list = list(document_types)
+        if len(doc_type_list) == 1:
+            query = query.where(
+                filter=FieldFilter("document_type", "==", doc_type_list[0])
+            )
+        else:
+            query = query.where(
+                filter=FieldFilter("document_type", "in", doc_type_list)
+            )
+
+    if data_sources:
+        ds_list = list(data_sources)
+        if len(ds_list) == 1:
+            query = query.where(
+                filter=FieldFilter("data_source", "==", ds_list[0])
+            )
+        else:
+            query = query.where(
+                filter=FieldFilter("data_source", "in", ds_list)
+            )
+
+    query = query.limit(limit)
+    return [snap.to_dict() for snap in query.stream()]
 
 
 class FirestoreRepo:

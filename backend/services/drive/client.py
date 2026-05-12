@@ -106,6 +106,51 @@ def _get_drive_service():
     return _drive_service
 
 
+def find_or_create_folder(name: str, parent_folder_id: str) -> str:
+    """
+    Return the Drive folder ID for `name` under `parent_folder_id`.
+    Creates the folder if it doesn't exist; returns the existing ID if
+    one matches by exact name.
+
+    Used by agent runners to materialize the per-lead Drive layout
+    (`/Leads/<municipality>/<contact>/<typed_subfolder>/...`) the first
+    time an agent writes for a new lead. Idempotent — re-runs are cheap.
+
+    Raises HttpError on Drive API failure (caller decides whether to
+    retry or fall back to writing flat).
+    """
+    service = _get_drive_service()
+    # Look for an existing folder of that name under the parent.
+    children = list_folder_files(parent_folder_id)
+    for child in children:
+        if (
+            child.get("mimeType") == FOLDER_MIME
+            and child.get("name") == name
+        ):
+            return child["id"]
+
+    # Not found — create it.
+    body = {
+        "name": name,
+        "mimeType": FOLDER_MIME,
+        "parents": [parent_folder_id],
+    }
+    response = (
+        service.files()
+        .create(body=body, fields="id, name", supportsAllDrives=True)
+        .execute()
+    )
+    logger.info(
+        "drive folder created",
+        extra={
+            "folder_id": response["id"],
+            "name": name,
+            "parent_folder_id": parent_folder_id,
+        },
+    )
+    return response["id"]
+
+
 def upload_text_file(
     folder_id: str,
     filename: str,
@@ -185,16 +230,87 @@ def list_folder_files(
 
 
 def get_file_metadata(file_id: str) -> dict[str, Any]:
-    """Fetch a single file's metadata (id, name, mimeType, parents)."""
+    """
+    Fetch a single file's metadata.
+
+    Returns the same field shape that `list_folder_files()` and
+    `walk_folder()` yield (id, name, mimeType, modifiedTime, webViewLink,
+    parents) plus `size`, so the result drops cleanly into any code path
+    that already understands walker output. `size` is needed by the
+    iflytek resolver to skip 0-byte sidecars.
+    """
     service = _get_drive_service()
     return (
         service.files()
         .get(
             fileId=file_id,
-            fields="id, name, mimeType, parents",
+            fields="id, name, mimeType, modifiedTime, webViewLink, parents, size",
             supportsAllDrives=True,
         )
         .execute()
+    )
+
+
+def derive_path_segments(
+    file_id: str,
+    stop_at_folder_id: str,
+    max_depth: int = 16,
+) -> list[str]:
+    """
+    Walk parents back from `file_id` up to (but not including)
+    `stop_at_folder_id`, returning folder names in root → leaf order.
+
+    Mirrors what `walk_folder()` yields as path_segments for a file at
+    the same location: the file's immediate parent name is last in the
+    list; `stop_at_folder_id`'s name is NOT included. Files directly
+    inside `stop_at_folder_id` get an empty list back.
+
+    Used by the single-file ingest entry point so per-source resolvers
+    see the same lineage shape they get during a recursive folder walk.
+
+    Raises ValueError if the file isn't actually a descendant of
+    `stop_at_folder_id` within `max_depth` levels — keeps mis-classified
+    files from sneaking into the wrong source taxonomy silently.
+    """
+    service = _get_drive_service()
+
+    # Start from the file's parent, not the file itself.
+    file_meta = (
+        service.files()
+        .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+        .execute()
+    )
+    parents = file_meta.get("parents") or []
+    if not parents:
+        raise ValueError(
+            f"file {file_id} has no parents — can't derive path segments"
+        )
+
+    segments: list[str] = []
+    current = parents[0]
+
+    for _ in range(max_depth):
+        if current == stop_at_folder_id:
+            return list(reversed(segments))
+
+        folder = (
+            service.files()
+            .get(
+                fileId=current,
+                fields="id, name, parents",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        segments.append(folder["name"])
+        next_parents = folder.get("parents") or []
+        if not next_parents:
+            break  # hit My Drive root without seeing stop_at_folder_id
+        current = next_parents[0]
+
+    raise ValueError(
+        f"file {file_id} is not a descendant of folder "
+        f"{stop_at_folder_id} within {max_depth} levels"
     )
 
 

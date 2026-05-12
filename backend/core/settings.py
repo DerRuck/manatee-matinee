@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     drive_watch_folder_id: str = ""
     drive_output_root_folder_id: str = ""  # Where agent outputs get mirrored.
 
+    # --- Gmail (drafts via domain-wide delegation) ---
+    # Default mailbox the Email Drafter impersonates when EmailDrafterInput
+    # leaves `from_user` unset. V1 multi-author strategy: caller supplies
+    # `from_user` per run; this is the fallback. V2 reads from a GHL custom
+    # field per contact (lead_owner_email) without code changes.
+    gmail_simmer_default_user: str = "tyler@chawq.org"
+
     # --- Server ---
     host: str = "0.0.0.0"
     port: int = 8080  # Cloud Run default.
