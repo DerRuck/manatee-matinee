@@ -6,9 +6,13 @@ import requests
 import google.auth
 from playwright.sync_api import sync_playwright
 from googleapiclient.discovery import build
+from google.auth import impersonated_credentials
 import base64
 import assemblyai as aai
-from google.auth import impersonated_credentials
+from deepgram import DeepgramClient
+from googleapiclient.http import MediaIoBaseUpload
+import io
+import anthropic
 
 # --- Configuration ---
 
@@ -27,7 +31,55 @@ SCOPES = [
 
 # --- Configuration END ---
 
+def save_html_as_gdoc(html_content, filename, drive_service):
+
+    file_metadata = {
+        'name': filename,
+        'parents': [os.getenv("DRIVE_FOLDER_ID")],
+        'mimeType': 'application/vnd.google-apps.document' 
+    }
+    
+    media = MediaIoBaseUpload(
+        io.BytesIO(html_content), 
+        mimetype='text/html', 
+        resumable=True
+    )
+    
+    try:
+        file = drive_service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+        print(f"Successfully created Google Doc: {filename}")
+        return file.get('id')
+    except Exception as e:
+        print(f"Failed to create Google Doc: {e}")
+        return None
+
 def transcribe_audio(audio_bytes):
+    print("Attempting primary transcription (AssemblyAI)...")
+    result = transcribe_audio_assemblyai(audio_bytes)
+    
+    transcript_text = result[0] if isinstance(result, tuple) else result
+    if transcript_text and not transcript_text.startswith("ERROR:"):
+        print("AssemblyAI transcription successful!")
+        return transcript_text
+    
+    print(f"AssemblyAI failed ({transcript_text}). Triggering fallback to Deepgram...")
+    
+    transcript_text = transcribe_audio_deepgram(audio_bytes)
+    
+    if transcript_text and not transcript_text.startswith("ERROR:"):
+        print("Deepgram fallback successful!")
+        return transcript_text
+        
+    # If BOTH fail, return a total failure error
+    print("CRITICAL: Both primary and fallback transcription services failed.")
+    return "ERROR: ALL_SERVICES_FAILED"
+
+def transcribe_audio_assemblyai(audio_bytes):
     aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
     
     transcriber = aai.Transcriber()
@@ -55,6 +107,61 @@ def transcribe_audio(audio_bytes):
     except Exception as e:
         print(f"AssemblyAI Transcription Failed: {e}")
         return "ERROR: Transcription completely failed."
+
+def transcribe_audio_deepgram(audio_bytes):
+    deepgram = DeepgramClient()
+        
+    try:
+        response = deepgram.listen.v1.media.transcribe_file(
+            request=audio_bytes,
+            model="nova-3",
+            smart_format=True,
+            diarize=True
+        )
+        
+        alternatives = response.results.channels[0].alternatives[0]
+        if hasattr(alternatives, 'paragraphs') and alternatives.paragraphs:
+            return alternatives.paragraphs.transcript
+        else:
+            return alternatives.transcript
+            
+    except Exception as e:
+        print(f"Deepgram Transcription Failed: {e}")
+        return "ERROR: Transcription completely failed."
+
+def generate_claude_summary(transcript_text):
+    if not transcript_text or transcript_text.startswith("ERROR:"):
+        return None
+
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    model_name = os.getenv("CLAUDE_MODEL", "claude-opus-4-7")
+    
+    # custom prompt 
+    system_prompt = (
+        "You are the C-HAWQ AI Assistant. You embody 'The Lead Scientist' and "
+        "'The Supportive Advisor'. Analyze the following meeting transcript. "
+        "Provide a structured summary with: \n"
+        "1. A 2-sentence executive overview.\n"
+        "2. Key Takeaways (Bullet points).\n"
+        "3. Action Items & Next Steps (Bullet points).\n"
+        "Do NOT use emojis. Maintain an objective, confident, and optimistic tone.\n"
+        "CRITICAL: Output the entire response in clean, raw HTML format using <h1>, <h2>, <ul>, <li>, and <strong> tags. Do NOT wrap your response in markdown code blocks."
+    )
+
+    try:
+        response = client.messages.create(
+            model=model_name,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": f"Here is the transcript to summarize:\n\n{transcript_text}"}
+            ]
+        )
+        return response.content[0].text
+
+    except Exception as e:
+        print(f"Claude Summarization Failed: {e}")
+        return "ERROR: Could not generate summary via Claude."    
 
 def get_services():
 
@@ -190,9 +297,18 @@ def scrape_and_upload(url, drive_service):
                 
                 # Transcribe audio
                 transcript_text = transcribe_audio(r.content)
-                if transcript_text:
+                
+                if transcript_text and not transcript_text.startswith("ERROR:"):
                     save_to_drive(transcript_text.encode('utf-8'), f"{base_name}_Transcript.txt", "text/plain", drive_service)
-
+                    summary_html = generate_claude_summary(transcript_text)
+                    if summary_html:
+                        summary_html = summary_html.replace("```html", "").replace("```", "").strip()
+                        save_html_as_gdoc(
+                            summary_html.encode('utf-8'), 
+                            f"{base_name} Summary",
+                            drive_service
+                        )
+                        
             # --- PDF & TXT ---
             page.wait_for_selector(".share-btn")
             page.click(".share-btn")
@@ -206,14 +322,14 @@ def scrape_and_upload(url, drive_service):
             with open(pdf_path, "rb") as f:
                 save_to_drive(f.read(), f"{base_name}.pdf", "application/pdf", drive_service)
 
-            # TXT
-            if not page.is_visible(".export-options"): page.click(".share-btn")
-            with page.expect_download() as dl_txt:
-                page.locator(".export-option", has_text="Export TXT").click()
-            download = dl_txt.value
-            txt_path = download.path()
-            with open(txt_path, "rb") as f:
-                save_to_drive(f.read(), f"{base_name}.txt", "text/plain", drive_service)
+            # TXT so far the text transcript is always blank, just skipping for now
+            # if not page.is_visible(".export-options"): page.click(".share-btn")
+            # with page.expect_download() as dl_txt:
+            #     page.locator(".export-option", has_text="Export TXT").click()
+            # download = dl_txt.value
+            # txt_path = download.path()
+            # with open(txt_path, "rb") as f:
+            #     save_to_drive(f.read(), f"{base_name}.txt", "text/plain", drive_service)
 
             browser.close()
         return True
