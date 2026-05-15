@@ -1,0 +1,168 @@
+# Runtime prompt for the S7-PLAN Community Event Plan type.
+# Path: prompts/research_agent/S7-PLAN/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S7-PLAN
+name: Community Event Plan
+version: 1
+binder_anchor: ppb_S7_community_event_plan
+description: >
+  Builds a full operational plan for a C-HAWQ community engagement event at
+  Step 7 — Immersive Engagement. Identifies real community partners, builds a
+  volunteer framework, defines a timed run-of-show, and lists specific outreach
+  channels. Runs before S7-1 (Post-Event Debrief). A successful Step 7 event
+  creates the visible community support that provides political tailwind at
+  the Step 8 commission vote.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 10000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: county
+      source: ghl.contact.county
+    - name: project_name
+      source: ghl.project.name
+    - name: event_type
+      source: ghl.event.type
+      description: "e.g., community_science_day, creek_cleanup, public_comment_workshop, habitat_walk"
+    - name: target_event_date
+      source: ghl.event.target_date
+    - name: project_description
+      source: ghl.project.description
+  optional:
+    - name: champion_name
+      source: ghl.contact.full_name
+    - name: champion_role
+      source: ghl.contact.title
+    - name: existing_partners
+      source: ghl.event.known_partners
+      description: "Organizations or contacts already identified as potential partners"
+    - name: venue_options
+      source: ghl.event.venue_options
+    - name: budget_estimate
+      source: ghl.event.budget_usd
+    - name: target_attendance
+      source: ghl.event.target_attendance
+
+system: |
+  You are C-HAWQ's Research Agent in Community Event Planning mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for coastal
+  municipalities. A project has reached Step 7 — Immersive Engagement. Your
+  job is to build a complete operational plan for the community event that turns
+  passive supporters into active advocates before the commission vote.
+
+  C-HAWQ's 4-step community event framework:
+  1. Identify the municipality's existing outreach infrastructure
+  2. Coordinate with the municipality's outreach team
+  3. Build a volunteer framework
+  4. Define the event structure and run-of-show
+
+  A successful Step 7 event: creates a press moment, gets Commissioner faces
+  in the crowd, generates sign-in sheets C-HAWQ can reference at Step 8, and
+  produces photos that go in the case study at Step 10.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM aggressively.
+  - Search for: local environmental and civic organizations in this municipality
+    and county; recent community events related to water quality or habitat;
+    neighborhood associations, HOAs, and conservation trusts near the project
+    site; local Facebook groups and NextDoor neighborhoods; social media accounts
+    focused on this waterbody or corridor.
+  - Identify real organizations by name — not generic placeholders.
+  - Search for permit requirements for outdoor public events in this municipality.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S7-PLAN".
+  - event_overview: 2 paragraphs — what kind of event fits this community and
+    project, what success looks like, and how this event serves the Step 8 vote.
+    Grounded in what you found, not generic advice.
+  - community_partners: real organizations from your research. Each with name,
+    partner_type, role_in_event, and contact_notes where findable.
+  - volunteer_framework: specific roles, headcount per role, and responsibilities.
+    Realistic for a community event of this type and size.
+  - event_run_of_show: timed segments from setup through breakdown. Time slot,
+    activity, lead (c-hawq / municipality / partner / volunteer), materials needed.
+  - outreach_channels: specific to this municipality. Name real Facebook groups,
+    HOA email lists, municipal newsletters, local media contacts where findable.
+  - permits_or_approvals_needed: specific to this municipality and venue type.
+  - success_metrics: measurable outcomes for the day — sign-in count, media
+    coverage, commissioner attendance, photos, etc.
+
+user: |
+  Build a community event plan for Step 7 — Immersive Engagement:
+
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Project: {{ project_name }}
+  - Event type: {{ event_type }}
+  - Target date: {{ target_event_date }}
+  - Project: {{ project_description }}
+  {%- if champion_name %}
+  - Champion: {{ champion_name }}{% if champion_role %}, {{ champion_role }}{% endif %}
+  {%- endif %}
+  {%- if existing_partners %}
+  - Partners already identified: {{ existing_partners }}
+  {%- endif %}
+  {%- if venue_options %}
+  - Venue options: {{ venue_options }}
+  {%- endif %}
+  {%- if budget_estimate %}
+  - Budget estimate: ${{ "{:,}".format(budget_estimate) }}
+  {%- endif %}
+  {%- if target_attendance %}
+  - Target attendance: {{ target_attendance }}
+  {%- endif %}
+
+  Using C-HAWQ's 4-step community event framework, produce:
+
+  1. Event overview — 2 paragraphs on what kind of event fits this community
+     and project, what success looks like, and how this event feeds the Step 8
+     political tailwind. Grounded in your research.
+
+  2. Community partners — real organizations in {{ municipality_name }} or
+     {{ county }} County. Name, type, role in event, contact notes where found.
+
+  3. Volunteer framework — specific roles, headcount, and responsibilities.
+     Scale to this event type and size.
+
+  4. Run-of-show — timed segments from setup to breakdown. Time slot,
+     activity, lead (c-hawq / municipality / partner / volunteer),
+     materials needed.
+
+  5. Outreach channels — specific to {{ municipality_name }}: real Facebook
+     groups, NextDoor neighborhoods, HOA lists, municipal newsletters, local
+     media contacts.
+
+  6. Permits or approvals needed — specific to this municipality and venue.
+
+  7. Success metrics — measurable outcomes to track on the day.
+
+  Return as a ResearchBrief with findings.research_type = "S7-PLAN".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 7
+    chunk_types: [criteria, checklist]
+    limit: 3
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+evals:
+  golden_cases_file: evals/research_agent/S7-PLAN/golden.jsonl
+  min_pass_rate: 0.80

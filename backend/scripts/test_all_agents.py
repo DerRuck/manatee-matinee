@@ -115,7 +115,7 @@ TESTS: list[tuple[str, dict]] = [
         "project_status":    "Pre-Step-3 — contact agreed to intake, no formal proposal yet.",
     }),
 
-    # S4-DECK: Deck research — presentation prep after Go decision
+    # S4-DECK: Deck research — visual and data assets for the Step 4 presentation
     ("S4-DECK", {
         "contact_id":        "ghl_test_003",
         "municipality_name": "Gainesville",
@@ -125,6 +125,37 @@ TESTS: list[tuple[str, dict]] = [
             "Visible water quality results, P3 funding structure, nature-based approach. "
             "Alex wants before/after data that will hold up at a commission meeting."
         ),
+    }),
+
+    # S4-LETTER: Champion briefing letter — sent after intake meeting, before deck
+    ("S4-LETTER", {
+        "contact_id":        "ghl_test_003",
+        "municipality_name": "Gainesville",
+        "county":            "Alachua",
+        "champion_name":     "Alex Rivera",
+        "champion_title":    "Public Works Director",
+        "meeting_date":      "2026-06-10",
+        "project_description": (
+            "Stormwater retrofit along Hogtown Creek — three outfall improvements "
+            "and 4 acres of riparian buffer restoration to reduce nitrogen loading "
+            "by an estimated 40%."
+        ),
+        "key_points_discussed": (
+            "Alex confirmed FDEP has flagged Hogtown Creek as impaired for nitrogen "
+            "for two years. He's been trying to find funding with no luck. Very "
+            "interested in P3 structure. Mentioned Finance Director will need "
+            "convincing. Asked specifically about FDEP Section 319."
+        ),
+        "agreed_next_steps": (
+            "C-HAWQ to deliver preliminary scope and funding roadmap within 3 weeks. "
+            "Alex to connect C-HAWQ with Stormwater Manager Keisha Thompson. "
+            "Schedule deck presentation for mid-July."
+        ),
+        "champion_motivation": (
+            "Alex has been fighting for Hogtown Creek funding for six years. "
+            "Personal frustration with the FDEP impaired status."
+        ),
+        "funding_interest": "FDEP Section 319, potentially SFWMD basin grants",
     }),
 
     # =========================================================================
@@ -247,6 +278,28 @@ TESTS: list[tuple[str, dict]] = [
     # =========================================================================
     # PHASE 3 — MOBILIZATION (Steps 7–8)
     # =========================================================================
+
+    # S7-PLAN: Community event plan — planning the Hogtown Creek community day
+    ("S7-PLAN", {
+        "contact_id":        "ghl_test_003",
+        "municipality_name": "Gainesville",
+        "county":            "Alachua",
+        "project_name":      "Hogtown Creek Stormwater Retrofit",
+        "event_type":        "community_science_day",
+        "target_event_date": "2026-08-02",
+        "project_description": (
+            "Stormwater outfall retrofit and riparian buffer restoration along "
+            "Hogtown Creek to reduce nitrogen loading by 40%."
+        ),
+        "champion_name":     "Alex Rivera",
+        "champion_role":     "Public Works Director",
+        "existing_partners": (
+            "Alachua Conservation Trust (Dr. Sarah Macon expressed interest). "
+            "Hogtown Creek Estates HOA (James Whitfield, president)."
+        ),
+        "venue_options":     "Hogtown Creek Linear Park, SE 4th Avenue corridor near outfall #2",
+        "target_attendance": 100,
+    }),
 
     # S7-1: Post-event debrief — Hogtown Creek community day
     ("S7-1", {

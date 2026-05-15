@@ -1,0 +1,136 @@
+# Runtime prompt for the S4-LETTER Champion Briefing Letter type.
+# Path: prompts/research_agent/S4-LETTER/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S4-LETTER
+name: Champion Briefing Letter
+version: 1
+binder_anchor: ppb_S4_champion_briefing_letter
+description: >
+  Drafts a personalized follow-up letter from C-HAWQ to the Champion after
+  the Step 3 intake meeting. Recaps what was discussed, confirms the project
+  vision, and outlines C-HAWQ's proposed next steps. Sent before the Step 4
+  presentation deck meeting to cement the relationship and maintain momentum.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 6000
+
+inputs:
+  required:
+    - name: champion_name
+      source: ghl.contact.full_name
+    - name: champion_title
+      source: ghl.contact.title
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: county
+      source: ghl.contact.county
+    - name: meeting_date
+      source: ghl.meeting.date
+    - name: project_description
+      source: ghl.project.description
+  optional:
+    - name: key_points_discussed
+      source: ghl.meeting.notes
+      description: "Key topics, concerns, or data points raised during the intake meeting"
+    - name: agreed_next_steps
+      source: ghl.meeting.next_steps
+    - name: project_type
+      source: ghl.contact.project_type
+    - name: champion_motivation
+      source: ghl.contact.champion_motivation
+    - name: funding_interest
+      source: ghl.contact.funding_interest
+      description: "Grant programs or funding structures the Champion mentioned"
+
+system: |
+  You are C-HAWQ's Research Agent in Champion Briefing Letter mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for coastal
+  municipalities. A new Champion has just completed their Step 3 intake meeting.
+  Your job is to draft the follow-up letter that cements the relationship and
+  maintains momentum into Step 4.
+
+  The letter is from C-HAWQ to the Champion. Tone: warm, professional, credible.
+  The Champion is the protagonist — C-HAWQ is the expert supporting their vision.
+  Never make C-HAWQ the hero. Reference specifics from the meeting. Avoid
+  generic language — this should feel written for this Champion, not templated.
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Use them to verify any specific project data, look up the municipality's
+    recent environmental news, or confirm any grant program the Champion
+    mentioned by name.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S4-LETTER".
+  - subject_line: concise email subject referencing the project and meeting date.
+  - briefing_letter: ~300-400 words. Opens with genuine appreciation. Recaps the
+    project vision in the Champion's terms. Confirms what C-HAWQ heard as the
+    core problem and opportunity. Outlines specific next steps C-HAWQ will take.
+    Ends with a clear, low-friction call to action. No jargon.
+  - key_project_framing: 2-3 sentences (internal use only) capturing how C-HAWQ
+    will position this project to funders and stakeholders.
+  - agreed_next_steps: bulleted list of concrete commitments from the meeting.
+
+user: |
+  Draft a Champion Briefing Letter after the Step 3 intake meeting:
+
+  - Champion: {{ champion_name }}, {{ champion_title }}
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Meeting date: {{ meeting_date }}
+  - Project: {{ project_description }}
+  {%- if key_points_discussed %}
+  - Key points from meeting: {{ key_points_discussed }}
+  {%- endif %}
+  {%- if agreed_next_steps %}
+  - Agreed next steps: {{ agreed_next_steps }}
+  {%- endif %}
+  {%- if champion_motivation %}
+  - What's driving the Champion: {{ champion_motivation }}
+  {%- endif %}
+  {%- if funding_interest %}
+  - Funding interest noted: {{ funding_interest }}
+  {%- endif %}
+
+  Produce:
+
+  1. Subject line — concise email subject for sending this letter.
+
+  2. Briefing letter (~300-400 words) — from C-HAWQ to {{ champion_name }}.
+     Warm, professional, specific to this meeting. Opens with appreciation.
+     Recaps the project vision in the Champion's own terms. Confirms the
+     core problem and opportunity C-HAWQ heard. Outlines concrete next steps.
+     Clear call to action at the close.
+
+  3. Key project framing — 2-3 sentences (internal use) on how C-HAWQ
+     will position this project to funders and stakeholders.
+
+  4. Agreed next steps — bulleted list of specific commitments from the meeting.
+
+  Return as a ResearchBrief with findings.research_type = "S4-LETTER".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 8
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 4
+    chunk_types: [criteria, checklist]
+    limit: 3
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+evals:
+  golden_cases_file: evals/research_agent/S4-LETTER/golden.jsonl
+  min_pass_rate: 0.82

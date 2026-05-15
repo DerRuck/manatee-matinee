@@ -845,6 +845,78 @@ class ReferralResearchFindings(BaseModel):
 
 
 # =============================================================================
+# S4-LETTER — Champion Briefing Letter (post-intake, pre-deck)
+# =============================================================================
+
+class ChampionBriefingLetterFindings(BaseModel):
+    research_type: Literal["S4-LETTER"] = "S4-LETTER"
+    subject_line: str = Field(description="Email subject referencing the project and meeting")
+    briefing_letter: str = Field(
+        description=(
+            "~300-400 word ready-to-send letter from C-HAWQ to the Champion. "
+            "Opens with appreciation, recaps the vision, confirms the problem, "
+            "outlines next steps, ends with a clear call to action."
+        ),
+    )
+    key_project_framing: str = Field(
+        description="2-3 sentences (internal use) capturing how C-HAWQ will position this project to funders",
+    )
+    agreed_next_steps: list[str] = Field(
+        min_length=1,
+        description="Concrete commitments both parties made at the intake meeting",
+    )
+
+
+# =============================================================================
+# S7-PLAN — Community Event Plan (pre-event, before S7-1 debrief)
+# =============================================================================
+
+class CommunityPartner(BaseModel):
+    name: str
+    partner_type: str = Field(description="e.g., conservation org, HOA, neighborhood association")
+    role_in_event: str
+    contact_notes: str | None = None
+
+
+class VolunteerRole(BaseModel):
+    role: str
+    count_needed: int = Field(ge=1)
+    responsibilities: list[str] = Field(min_length=1)
+
+
+class EventSegment(BaseModel):
+    time_slot: str = Field(description="e.g., '9:00–9:30 AM'")
+    activity: str
+    lead: Literal["c-hawq", "municipality", "partner", "volunteer"]
+    materials_needed: list[str] = Field(default_factory=list)
+
+
+class CommunityEventPlanFindings(BaseModel):
+    research_type: Literal["S7-PLAN"] = "S7-PLAN"
+    event_overview: str = Field(
+        description="2 paragraphs: what kind of event fits this community and what success looks like",
+    )
+    community_partners: list[CommunityPartner] = Field(
+        min_length=1,
+        description="Real organizations identified by research",
+    )
+    volunteer_framework: list[VolunteerRole] = Field(default_factory=list)
+    event_run_of_show: list[EventSegment] = Field(
+        min_length=3,
+        description="Timed segments from setup through breakdown",
+    )
+    outreach_channels: list[str] = Field(
+        min_length=2,
+        description="Specific channels for this municipality — local Facebook groups, NextDoor, HOA lists, etc.",
+    )
+    permits_or_approvals_needed: list[str] = Field(default_factory=list)
+    success_metrics: list[str] = Field(
+        min_length=2,
+        description="Measurable outcomes to track on the day",
+    )
+
+
+# =============================================================================
 # Discriminated union — Pydantic auto-routes by research_type literal
 # =============================================================================
 
@@ -860,10 +932,12 @@ Findings = Annotated[
         ContactBackgroundFindings,              # S1-4
         CommissionMeetingPrepFindings,          # S3-3
         DeckResearchFindings,                   # S4-DECK
+        ChampionBriefingLetterFindings,         # S4-LETTER
         InternalPresentationPrepFindings,       # S5-1
         PostMeetingDebriefFindings,             # S5-2
         ProjectNarrativeFindings,               # S6-2
         CommissionPresentationPrepFindings,     # S6-3
+        CommunityEventPlanFindings,             # S7-PLAN
         PostEventDebriefFindings,               # S7-1
         CommunityLetterFindings,                # S8-2
         PoliticianBriefingFindings,             # S8-3
@@ -937,30 +1011,32 @@ class ResearchBrief(BaseModel):
 # =============================================================================
 
 _FINDINGS_TYPE_MAP: dict[str, type] = {
-    "S6-1":    GrantFindings,
-    "PW-3":    MunicipalityFindings,
-    "S3-PREP": IntakePrepFindings,
-    "S8-1":    PoliticalFindings,
-    "LOBBY-1": LobbyistFindings,
-    "PW-1":    ConferenceAttendeeFindings,
-    "S1-2":    LinkedInFindings,
-    "S1-4":    ContactBackgroundFindings,
-    "S3-3":    CommissionMeetingPrepFindings,
-    "S4-DECK": DeckResearchFindings,
-    "S5-1":    InternalPresentationPrepFindings,
-    "S5-2":    PostMeetingDebriefFindings,
-    "S6-2":    ProjectNarrativeFindings,
-    "S6-3":    CommissionPresentationPrepFindings,
-    "S7-1":    PostEventDebriefFindings,
-    "S8-2":    CommunityLetterFindings,
-    "S8-3":    PoliticianBriefingFindings,
-    "S9-1":    KickoffDeckFindings,
-    "S9-2":    MediaResearchFindings,
-    "S9-3":    GrantComplianceFindings,
-    "S9-4":    P3ProposalFindings,
-    "S9-5":    AgreementSummaryFindings,
-    "S10-1":   CaseStudyFindings,
-    "S10-2":   ReferralResearchFindings,
+    "S6-1":     GrantFindings,
+    "PW-3":     MunicipalityFindings,
+    "S3-PREP":  IntakePrepFindings,
+    "S8-1":     PoliticalFindings,
+    "LOBBY-1":  LobbyistFindings,
+    "PW-1":     ConferenceAttendeeFindings,
+    "S1-2":     LinkedInFindings,
+    "S1-4":     ContactBackgroundFindings,
+    "S3-3":     CommissionMeetingPrepFindings,
+    "S4-DECK":  DeckResearchFindings,
+    "S4-LETTER": ChampionBriefingLetterFindings,
+    "S5-1":     InternalPresentationPrepFindings,
+    "S5-2":     PostMeetingDebriefFindings,
+    "S6-2":     ProjectNarrativeFindings,
+    "S6-3":     CommissionPresentationPrepFindings,
+    "S7-PLAN":  CommunityEventPlanFindings,
+    "S7-1":     PostEventDebriefFindings,
+    "S8-2":     CommunityLetterFindings,
+    "S8-3":     PoliticianBriefingFindings,
+    "S9-1":     KickoffDeckFindings,
+    "S9-2":     MediaResearchFindings,
+    "S9-3":     GrantComplianceFindings,
+    "S9-4":     P3ProposalFindings,
+    "S9-5":     AgreementSummaryFindings,
+    "S10-1":    CaseStudyFindings,
+    "S10-2":    ReferralResearchFindings,
 }
 
 

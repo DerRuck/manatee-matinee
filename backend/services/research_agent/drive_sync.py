@@ -51,9 +51,11 @@ _TYPE_NAMES: dict[str, str] = {
     "S9-2":    "Media & Reporter Research",
     "S9-3":    "Grant Compliance Checklist",
     "S9-4":    "P3 Proposal & RFP Draft",
-    "S9-5":    "Partnership Agreement Summary",
-    "S10-1":   "Project Case Study",
-    "S10-2":   "Referral Outreach Research",
+    "S9-5":     "Partnership Agreement Summary",
+    "S10-1":    "Project Case Study",
+    "S10-2":    "Referral Outreach Research",
+    "S4-LETTER": "Champion Briefing Letter",
+    "S7-PLAN":  "Community Event Plan",
 }
 
 # Override auto-generated Title Case labels with friendlier names
@@ -568,13 +570,315 @@ def _render_s10_1(doc: Any, findings: Any) -> None:
     doc.add_paragraph(findings.before_after_narrative)
 
 
+def _render_s4_letter(doc: Any, findings: Any) -> None:
+    """S4-LETTER — Champion Briefing Letter: ready-to-send letter + internal framing."""
+    p = doc.add_paragraph()
+    p.add_run("Subject: ").bold = True
+    p.add_run(findings.subject_line)
+
+    doc.add_heading("Briefing Letter", 1)
+    doc.add_paragraph(
+        "Ready to send — edit the signature block before sending.",
+    ).italic = True
+    doc.add_paragraph(findings.briefing_letter)
+
+    doc.add_heading("Key Project Framing", 1)
+    doc.add_paragraph("Internal use — how C-HAWQ will position this project to funders.").italic = True
+    doc.add_paragraph(findings.key_project_framing)
+
+    doc.add_heading("Agreed Next Steps", 1)
+    for step in findings.agreed_next_steps:
+        doc.add_paragraph(step, style="List Bullet")
+
+
+def _render_s7_plan(doc: Any, findings: Any) -> None:
+    """S7-PLAN — Community Event Plan: tables for partners, run-of-show, and volunteer roles."""
+    doc.add_heading("Event Overview", 1)
+    doc.add_paragraph(findings.event_overview)
+
+    if findings.community_partners:
+        doc.add_heading("Community Partners", 1)
+        tbl = doc.add_table(rows=1, cols=4)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Organization", "Type", "Role in Event", "Contact Notes")
+        for partner in findings.community_partners:
+            row = tbl.add_row().cells
+            row[0].text = partner.name
+            row[1].text = partner.partner_type
+            row[2].text = partner.role_in_event
+            row[3].text = partner.contact_notes or "—"
+
+    if findings.volunteer_framework:
+        doc.add_heading("Volunteer Framework", 1)
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Role", "# Needed", "Responsibilities")
+        for vol in findings.volunteer_framework:
+            row = tbl.add_row().cells
+            row[0].text = vol.role
+            row[1].text = str(vol.count_needed)
+            row[2].text = "\n".join(f"• {r}" for r in vol.responsibilities)
+
+    if findings.event_run_of_show:
+        doc.add_heading("Run of Show", 1)
+        tbl = doc.add_table(rows=1, cols=4)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Time", "Activity", "Lead", "Materials")
+        for seg in findings.event_run_of_show:
+            row = tbl.add_row().cells
+            row[0].text = seg.time_slot
+            row[1].text = seg.activity
+            row[2].text = seg.lead.upper()
+            row[3].text = ", ".join(seg.materials_needed) if seg.materials_needed else "—"
+
+    if findings.outreach_channels:
+        doc.add_heading("Outreach Channels", 1)
+        for ch in findings.outreach_channels:
+            doc.add_paragraph(ch, style="List Bullet")
+
+    if findings.permits_or_approvals_needed:
+        doc.add_heading("Permits & Approvals Needed", 1)
+        for item in findings.permits_or_approvals_needed:
+            doc.add_paragraph(item, style="List Bullet")
+
+    if findings.success_metrics:
+        doc.add_heading("Success Metrics", 1)
+        for m in findings.success_metrics:
+            doc.add_paragraph(m, style="List Bullet")
+
+
+def _render_s6_1(doc: Any, findings: Any) -> None:
+    """S6-1 — Grant Opportunity Research: one section per grant + risks and contractors tables."""
+    doc.add_heading("Grant Opportunities", 1)
+    for grant in findings.grants:
+        doc.add_heading(grant.name, 2)
+
+        p = doc.add_paragraph()
+        p.add_run("Agency: ").bold = True
+        p.add_run(grant.administering_agency)
+
+        if grant.typical_award_usd_min or grant.typical_award_usd_max:
+            p2 = doc.add_paragraph()
+            p2.add_run("Typical Award: ").bold = True
+            if grant.typical_award_usd_min and grant.typical_award_usd_max:
+                p2.add_run(f"${grant.typical_award_usd_min:,} – ${grant.typical_award_usd_max:,}")
+            elif grant.typical_award_usd_max:
+                p2.add_run(f"Up to ${grant.typical_award_usd_max:,}")
+            else:
+                p2.add_run(f"From ${grant.typical_award_usd_min:,}")
+
+        p3 = doc.add_paragraph()
+        p3.add_run("P3 Compatible: ").bold = True
+        p3.add_run(grant.p3_compatible.replace("_", " ").title())
+
+        p4 = doc.add_paragraph()
+        p4.add_run("Deadline / Cycle: ").bold = True
+        p4.add_run(grant.deadline_or_cycle)
+
+        doc.add_heading("Eligibility", 3)
+        doc.add_paragraph(grant.eligibility_summary)
+
+        if grant.documentation_required:
+            doc.add_heading("Documentation Required", 3)
+            for d in grant.documentation_required:
+                doc.add_paragraph(d, style="List Bullet")
+
+        if grant.florida_precedents:
+            doc.add_heading("Florida Precedents", 3)
+            for fp in grant.florida_precedents:
+                p = doc.add_paragraph(style="List Bullet")
+                p.add_run(f"{fp.municipality or 'FL'} ({fp.year}): ").bold = True
+                p.add_run(fp.outcome)
+
+    if findings.risks_and_disqualifiers:
+        doc.add_heading("Risks & Disqualifiers", 1)
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Risk", "Severity", "Mitigation")
+        for risk in findings.risks_and_disqualifiers:
+            row = tbl.add_row().cells
+            row[0].text = risk.description
+            row[1].text = risk.severity.upper()
+            row[2].text = risk.mitigation or "—"
+
+    if findings.p3_contractors:
+        doc.add_heading("P3 Contractors with Florida Track Record", 1)
+        tbl = doc.add_table(rows=1, cols=4)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Firm", "Project", "Municipality", "Outcome")
+        for gc in findings.p3_contractors:
+            row = tbl.add_row().cells
+            row[0].text = gc.firm_name
+            row[1].text = gc.project_executed
+            row[2].text = gc.municipality or "—"
+            row[3].text = gc.outcome
+
+
+def _render_s6_3(doc: Any, findings: Any) -> None:
+    """S6-3 — Commission Presentation Prep: script + objections + what-not-to-say."""
+    doc.add_heading("Opening Script", 1)
+    doc.add_paragraph("Verbatim 5-minute opening — read as written.").italic = True
+    doc.add_paragraph(findings.opening_script)
+
+    doc.add_heading("Top Objections", 1)
+    for obj in findings.top_objections:
+        label = obj.objection
+        if obj.commissioner_type_likely:
+            label += f"  [{obj.commissioner_type_likely}]"
+        doc.add_heading(label, 3)
+        doc.add_paragraph(obj.response)
+
+    doc.add_heading("What Not to Say", 1)
+    for item in findings.things_not_to_say:
+        doc.add_paragraph(item, style="List Bullet")
+
+    doc.add_heading("Closing Statement", 1)
+    doc.add_paragraph(findings.closing_statement)
+
+    doc.add_heading("Why C-HAWQ?", 1)
+    doc.add_paragraph(
+        'Prepared response to “Why C-HAWQ and not a normal engineering firm?”',
+    ).italic = True
+    doc.add_paragraph(findings.why_chawq_answer)
+
+
+def _render_s8_1(doc: Any, findings: Any) -> None:
+    """S8-1 — Political Landscape Mapping: commissioner table + action plan + derailer tables."""
+    doc.add_heading("Commissioner Profiles", 1)
+    tbl = doc.add_table(rows=1, cols=4)
+    tbl.style = "Table Grid"
+    _tbl_header(tbl, "Commissioner", "Seat", "Risk", "Most Likely Objection")
+    for cp in findings.commissioner_profiles:
+        row = tbl.add_row().cells
+        row[0].text = cp.name
+        row[1].text = cp.seat or "—"
+        row[2].text = cp.risk_level.upper()
+        row[3].text = cp.most_likely_objection
+
+    doc.add_heading("Counter-Strategies", 1)
+    for cp in findings.commissioner_profiles:
+        doc.add_heading(cp.name, 3)
+        p = doc.add_paragraph()
+        p.add_run("Most likely objection: ").bold = True
+        p.add_run(cp.most_likely_objection)
+        p2 = doc.add_paragraph()
+        p2.add_run("Most effective counter: ").bold = True
+        p2.add_run(cp.most_effective_counter)
+
+    doc.add_heading("3-Week Action Plan", 1)
+    tbl = doc.add_table(rows=1, cols=3)
+    tbl.style = "Table Grid"
+    _tbl_header(tbl, "Week", "Owner", "Task")
+    for action in findings.three_week_action_plan:
+        row = tbl.add_row().cells
+        row[0].text = f"Week {action.week}"
+        row[1].text = action.owner.upper()
+        row[2].text = action.task
+
+    if findings.high_leverage_community_voices:
+        doc.add_heading("High-Leverage Community Voices", 1)
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Name / Organization", "Leverage", "Suggested Action")
+        for voice in findings.high_leverage_community_voices:
+            row = tbl.add_row().cells
+            row[0].text = voice.name_or_org
+            row[1].text = voice.leverage_summary
+            row[2].text = voice.suggested_action
+
+    if findings.top_derailers_and_mitigations:
+        doc.add_heading("Top Derailers & Mitigations", 1)
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Derailer", "Severity", "Mitigation")
+        for risk in findings.top_derailers_and_mitigations:
+            row = tbl.add_row().cells
+            row[0].text = risk.description
+            row[1].text = risk.severity.upper()
+            row[2].text = risk.mitigation or "—"
+
+
+def _render_s9_1(doc: Any, findings: Any) -> None:
+    """S9-1 — Project Kickoff Deck: slide cards with speaker notes + open items."""
+    doc.add_heading("Kickoff Deck", 1)
+    for slide in findings.slides:
+        doc.add_heading(f"Slide {slide.slide_number}: {slide.section_title}", 2)
+        for bp in slide.bullet_points:
+            doc.add_paragraph(bp, style="List Bullet")
+        if slide.speaker_notes:
+            p = doc.add_paragraph()
+            p.add_run("Speaker notes: ").bold = True
+            p.add_run(slide.speaker_notes)
+
+    if findings.open_items_register:
+        doc.add_heading("Open Items Register", 1)
+        doc.add_paragraph(
+            "Assign an owner and deadline to each item at the kickoff meeting.",
+        ).italic = True
+        for item in findings.open_items_register:
+            doc.add_paragraph(item, style="List Bullet")
+
+
+def _render_s9_2(doc: Any, findings: Any) -> None:
+    """S9-2 — Media & Reporter Research: combined outlets table + reporters + pitch emails."""
+    all_outlets = (
+        [("Local", o) for o in findings.local_outlets]
+        + [("Regional Environmental", o) for o in findings.regional_environmental_press]
+        + [("Municipal Trade", o) for o in findings.municipal_trade_press]
+    )
+
+    if all_outlets:
+        doc.add_heading("Media Outlets", 1)
+        tbl = doc.add_table(rows=1, cols=4)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Outlet", "Type", "Coverage Area", "Relevant Beat")
+        for category, outlet in all_outlets:
+            row = tbl.add_row().cells
+            row[0].text = outlet.outlet_name
+            row[1].text = category
+            row[2].text = outlet.coverage_area
+            row[3].text = outlet.relevant_beat or "—"
+
+    if findings.beat_reporters:
+        doc.add_heading("Beat Reporters", 1)
+        tbl = doc.add_table(rows=1, cols=4)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Reporter", "Outlet", "Beat", "Recent Byline")
+        for reporter in findings.beat_reporters:
+            row = tbl.add_row().cells
+            row[0].text = reporter.name
+            row[1].text = reporter.outlet
+            row[2].text = reporter.beat
+            row[3].text = reporter.recent_relevant_byline or "—"
+
+    if findings.wire_syndication_assessment:
+        doc.add_heading("Wire Syndication Assessment", 1)
+        doc.add_paragraph(findings.wire_syndication_assessment)
+
+    if findings.pitch_emails:
+        doc.add_heading("Pitch Emails", 1)
+        for email in findings.pitch_emails:
+            doc.add_heading(email.target_outlet_or_reporter, 2)
+            p = doc.add_paragraph()
+            p.add_run("Subject: ").bold = True
+            p.add_run(email.subject)
+            doc.add_paragraph(email.body)
+
+
 _CUSTOM_RENDERERS: dict[str, Any] = {
-    "S8-2":  _render_s8_2,
-    "S8-3":  _render_s8_3,
-    "S9-3":  _render_s9_3,
-    "S9-4":  _render_s9_4,
-    "S9-5":  _render_s9_5,
-    "S10-1": _render_s10_1,
+    "S4-LETTER": _render_s4_letter,
+    "S6-1":      _render_s6_1,
+    "S6-3":      _render_s6_3,
+    "S7-PLAN":   _render_s7_plan,
+    "S8-1":      _render_s8_1,
+    "S8-2":      _render_s8_2,
+    "S8-3":      _render_s8_3,
+    "S9-1":      _render_s9_1,
+    "S9-2":      _render_s9_2,
+    "S9-3":      _render_s9_3,
+    "S9-4":      _render_s9_4,
+    "S9-5":      _render_s9_5,
+    "S10-1":     _render_s10_1,
 }
 
 
