@@ -368,6 +368,216 @@ def _render_model(doc: Any, model: Any, level: int, skip_fields: set) -> None:
             _render_model(doc, value, level + 1, skip_fields=_SKIP_NESTED)
 
 
+# ---------------------------------------------------------------------------
+# Type-specific renderers
+# Registered in _CUSTOM_RENDERERS; called instead of the generic _render_model
+# for types where layout matters as much as content.
+# ---------------------------------------------------------------------------
+
+def _tbl_header(table: Any, *labels: str) -> None:
+    """Write bold header cells into the first row of a table."""
+    for cell, label in zip(table.rows[0].cells, labels):
+        p = cell.paragraphs[0]
+        p.clear()
+        p.add_run(label).bold = True
+
+
+def _render_s8_2(doc: Any, findings: Any) -> None:
+    """S8-2 — Community Support Letter: letter body + spoken statement."""
+    doc.add_heading("Support Letter", 1)
+    doc.add_paragraph(
+        "Ready to print on organization letterhead. Edit the signature block before sending.",
+    ).italic = True
+    doc.add_paragraph(findings.support_letter)
+
+    doc.add_heading("Public Comment Statement", 1)
+    doc.add_paragraph(
+        "2–3 minute spoken adaptation for commission meeting public comment.",
+    ).italic = True
+    doc.add_paragraph(findings.public_comment_statement)
+
+
+def _render_s8_3(doc: Any, findings: Any) -> None:
+    """S8-3 — Politician-Friendly Briefing: slide cards, objection table, leave-behind."""
+    doc.add_heading("5-Slide Outline", 1)
+    for slide in findings.five_slide_outline:
+        doc.add_heading(f"Slide {slide.slide_number}: {slide.title}", 2)
+        for pt in slide.talking_points:
+            doc.add_paragraph(pt, style="List Bullet")
+
+    doc.add_heading("Objection Responses", 1)
+    for obj in findings.political_objection_responses:
+        doc.add_heading(obj.objection, 3)
+        doc.add_paragraph(obj.response)
+
+    if findings.local_angle:
+        doc.add_heading("Local Angle", 1)
+        doc.add_paragraph(findings.local_angle)
+
+    if findings.leave_behind:
+        doc.add_heading("Leave-Behind (Plain-Language One-Pager)", 1)
+        doc.add_paragraph(findings.leave_behind)
+
+    if findings.suggested_ask:
+        doc.add_heading("Suggested Ask", 1)
+        doc.add_paragraph(findings.suggested_ask)
+
+
+def _render_s9_3(doc: Any, findings: Any) -> None:
+    """S9-3 — Grant Compliance Checklist: table-based checklist + pitfalls + email."""
+    doc.add_heading("Program Requirements", 1)
+    doc.add_paragraph(findings.program_requirements_summary)
+
+    doc.add_heading("Compliance Checklist", 1)
+    tbl = doc.add_table(rows=1, cols=3)
+    tbl.style = "Table Grid"
+    _tbl_header(tbl, "Requirement", "When Due", "Documentation Needed")
+    for req in findings.compliance_checklist:
+        row = tbl.add_row().cells
+        row[0].text = req.requirement
+        row[1].text = req.timing
+        row[2].text = "\n".join(f"• {d}" for d in req.documentation_needed)
+
+    doc.add_heading("Day-One Records to Establish", 1)
+    for item in findings.day_one_records:
+        doc.add_paragraph(item, style="List Bullet")
+
+    if findings.common_pitfalls:
+        doc.add_heading("Common Pitfalls", 1)
+        for pitfall in findings.common_pitfalls:
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(pitfall.pitfall).bold = True
+            doc.add_paragraph(f"Prevention: {pitfall.prevention}")
+
+    if findings.six_month_checkin_email:
+        doc.add_heading("6-Month Check-In Email", 1)
+        _render_email_draft(doc, findings.six_month_checkin_email)
+
+
+def _render_s9_4(doc: Any, findings: Any) -> None:
+    """S9-4 — P3 Proposal: real document sections + evaluation criteria table."""
+    doc.add_heading("Proposal", 1)
+    for section in findings.proposal_sections:
+        doc.add_heading(section.section_title, 2)
+        doc.add_paragraph(section.content)
+
+    doc.add_heading("Complexity Factors & Required Contract Language", 1)
+    for cf in findings.complexity_factors:
+        p = doc.add_paragraph(style="List Bullet")
+        p.add_run(cf.factor + ": ").bold = True
+        p.add_run(cf.special_contract_language_needed)
+
+    doc.add_heading("GC Evaluation Criteria", 1)
+    tbl = doc.add_table(rows=1, cols=3)
+    tbl.style = "Table Grid"
+    _tbl_header(tbl, "Criterion", "Priority", "Rationale")
+    for gc in findings.gc_evaluation_criteria:
+        row = tbl.add_row().cells
+        row[0].text = gc.criterion
+        row[1].text = gc.weight_or_priority.upper()
+        row[2].text = gc.rationale
+
+    if findings.procurement_conflicts:
+        doc.add_heading("Procurement Conflicts", 1)
+        for pc in findings.procurement_conflicts:
+            doc.add_heading(pc.standard_term, 3)
+            p = doc.add_paragraph()
+            p.add_run("Conflict: ").bold = True
+            p.add_run(pc.conflict_description)
+            p2 = doc.add_paragraph()
+            p2.add_run("Suggested language: ").bold = True
+            p2.add_run(pc.suggested_alternative_language)
+
+
+def _render_s9_5(doc: Any, findings: Any) -> None:
+    """S9-5 — Agreement Summary: plain-language first, risk table, attorney questions."""
+    doc.add_heading("Plain-Language Summary", 1)
+    doc.add_paragraph("Written for a non-attorney commissioner — 2-minute read.").italic = True
+    doc.add_paragraph(findings.plain_language_summary)
+
+    if findings.risk_flags:
+        doc.add_heading("Risk Flags", 1)
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Section / Term", "Concern", "Severity")
+        for flag in findings.risk_flags:
+            row = tbl.add_row().cells
+            row[0].text = flag.term_or_section
+            row[1].text = flag.concern
+            row[2].text = flag.severity.upper()
+
+    if findings.attorney_questions:
+        doc.add_heading("Questions for Your Attorney", 1)
+        for q in findings.attorney_questions:
+            doc.add_heading(q.question, 3)
+            p = doc.add_paragraph()
+            p.add_run("Why it matters: ").bold = True
+            p.add_run(q.why_important)
+
+    if findings.one_sided_terms:
+        doc.add_heading("One-Sided Terms", 1)
+        for term in findings.one_sided_terms:
+            doc.add_paragraph(term, style="List Bullet")
+
+    if findings.complexity_factors_covered:
+        doc.add_heading("Complexity Factors Coverage", 1)
+        tbl = doc.add_table(rows=1, cols=3)
+        tbl.style = "Table Grid"
+        _tbl_header(tbl, "Factor", "Status", "Notes")
+        for cf in findings.complexity_factors_covered:
+            row = tbl.add_row().cells
+            row[0].text = cf.factor
+            row[1].text = cf.status.replace("_", " ").title()
+            row[2].text = cf.notes or ""
+
+
+def _render_s10_1(doc: Any, findings: Any) -> None:
+    """S10-1 — Project Case Study: five distinct published assets, each on its own page."""
+    doc.add_heading("Asset 1 of 5 — Leave-Behind Case Study", 1)
+    doc.add_paragraph(
+        "For city managers, stakeholders, and prospect meetings. ~400–500 words.",
+    ).italic = True
+    doc.add_paragraph(findings.leave_behind_case_study)
+
+    doc.add_page_break()
+    doc.add_heading("Asset 2 of 5 — Website Highlight", 1)
+    doc.add_paragraph("For chawq.org — third person, human story first. ~300 words.").italic = True
+    doc.add_paragraph(findings.website_highlight)
+
+    doc.add_page_break()
+    doc.add_heading("Asset 3 of 5 — Press Pitch", 1)
+    doc.add_paragraph(
+        "For environmental and water industry editors. 2 paragraphs.",
+    ).italic = True
+    doc.add_paragraph(findings.press_pitch)
+
+    doc.add_page_break()
+    doc.add_heading("Asset 4 of 5 — Pull Quotes", 1)
+    doc.add_paragraph(
+        "Three headline-worthy sentences for design, slides, and social use.",
+    ).italic = True
+    for i, quote in enumerate(findings.pull_quotes, 1):
+        p = doc.add_paragraph()
+        p.add_run(f"{i}.  “{quote}”")
+
+    doc.add_page_break()
+    doc.add_heading("Asset 5 of 5 — Before / After Narrative", 1)
+    doc.add_paragraph(
+        "For general public — event programs, newsletters, community media. ~150–250 words.",
+    ).italic = True
+    doc.add_paragraph(findings.before_after_narrative)
+
+
+_CUSTOM_RENDERERS: dict[str, Any] = {
+    "S8-2":  _render_s8_2,
+    "S8-3":  _render_s8_3,
+    "S9-3":  _render_s9_3,
+    "S9-4":  _render_s9_4,
+    "S9-5":  _render_s9_5,
+    "S10-1": _render_s10_1,
+}
+
+
 def render_docx(brief: ResearchBrief) -> bytes:
     """Render a ResearchBrief as a Word document and return the raw bytes."""
     from docx import Document
@@ -389,8 +599,12 @@ def render_docx(brief: ResearchBrief) -> bytes:
     meta.add_run("     Run: ").bold = True
     meta.add_run(brief.run_id[:8])
 
-    # ---- Findings ------------------------------------------------------------
-    _render_model(doc, brief.findings, level=1, skip_fields=_SKIP_ALWAYS)
+    # ---- Findings — type-specific or generic --------------------------------
+    custom = _CUSTOM_RENDERERS.get(brief.research_type_id)
+    if custom:
+        custom(doc, brief.findings)
+    else:
+        _render_model(doc, brief.findings, level=1, skip_fields=_SKIP_ALWAYS)
 
     # ---- Agent notes ---------------------------------------------------------
     if brief.notes:
