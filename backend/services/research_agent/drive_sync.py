@@ -259,6 +259,7 @@ def _item_heading(obj: Any, index: int) -> str:
         "term_or_section", "action", "task", "department",
         "slide_number", "week",
         "concern", "observation", "description",
+        "issue", "project_name", "metric", "statistic", "name_or_role",
     ):
         val = getattr(obj, attr, None)
         if val is not None:
