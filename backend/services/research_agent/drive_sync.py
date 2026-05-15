@@ -258,6 +258,7 @@ def _item_heading(obj: Any, index: int) -> str:
         "question", "objection", "pitfall", "standard_term",
         "term_or_section", "action", "task", "department",
         "slide_number", "week",
+        "concern", "observation", "description",
     ):
         val = getattr(obj, attr, None)
         if val is not None:
@@ -570,6 +571,76 @@ def _render_s10_1(doc: Any, findings: Any) -> None:
     doc.add_paragraph(findings.before_after_narrative)
 
 
+def _render_lobby_1(doc: Any, findings: Any) -> None:
+    """LOBBY-1 — Lobbyist Registration Check: YES/NO answer first, details below."""
+    doc.add_heading("Registration Required", 1)
+    if findings.registration_required:
+        answer = "YES — Registration required before any lobbying activity."
+    else:
+        answer = "NO — No registration required for this jurisdiction."
+    p = doc.add_paragraph()
+    p.add_run(answer).bold = True
+
+    if findings.timing_requirement:
+        p = doc.add_paragraph()
+        p.add_run("Timing: ").bold = True
+        p.add_run(findings.timing_requirement)
+
+    if findings.registration_form_url:
+        p = doc.add_paragraph()
+        p.add_run("Registration Form: ").bold = True
+        p.add_run(str(findings.registration_form_url))
+
+    if findings.fees:
+        p = doc.add_paragraph()
+        p.add_run("Fees: ").bold = True
+        p.add_run(findings.fees)
+
+    if findings.submission_office:
+        p = doc.add_paragraph()
+        p.add_run("Submit To: ").bold = True
+        p.add_run(findings.submission_office)
+
+    if findings.submission_method:
+        p = doc.add_paragraph()
+        p.add_run("Method: ").bold = True
+        p.add_run(findings.submission_method)
+
+    if findings.county_covers_municipalities is not None:
+        p = doc.add_paragraph()
+        p.add_run("County Registration Covers Municipalities: ").bold = True
+        p.add_run("Yes" if findings.county_covers_municipalities else "No")
+
+    if findings.reporting_requirements:
+        doc.add_heading("Reporting Requirements", 1)
+        for req in findings.reporting_requirements:
+            doc.add_paragraph(req, style="List Bullet")
+
+
+def _render_pw_1(doc: Any, findings: Any) -> None:
+    """PW-1 — Conference Attendee Research: scannable table first, detail sections below."""
+    doc.add_paragraph(f"Conference: {findings.conference_name}").italic = True
+
+    doc.add_heading("Priority Contacts", 1)
+    tbl = doc.add_table(rows=1, cols=4)
+    tbl.style = "Table Grid"
+    _tbl_header(tbl, "Name", "Title / Organization", "Priority", "Suggested Opener")
+    for contact in findings.top_priority_contacts:
+        row = tbl.add_row().cells
+        row[0].text = contact.name
+        row[1].text = f"{contact.title}\n{contact.organization}"
+        row[2].text = contact.relevance_to_chawq.upper()
+        row[3].text = contact.suggested_opener
+
+    doc.add_heading("Why Each Contact Matters", 1)
+    for contact in findings.top_priority_contacts:
+        doc.add_heading(f"{contact.name} — {contact.organization}", 2)
+        p = doc.add_paragraph()
+        p.add_run("Title: ").bold = True
+        p.add_run(contact.title)
+        doc.add_paragraph(contact.why_priority)
+
+
 def _render_s4_letter(doc: Any, findings: Any) -> None:
     """S4-LETTER — Champion Briefing Letter: ready-to-send letter + internal framing."""
     p = doc.add_paragraph()
@@ -866,6 +937,8 @@ def _render_s9_2(doc: Any, findings: Any) -> None:
 
 
 _CUSTOM_RENDERERS: dict[str, Any] = {
+    "LOBBY-1":   _render_lobby_1,
+    "PW-1":      _render_pw_1,
     "S4-LETTER": _render_s4_letter,
     "S6-1":      _render_s6_1,
     "S6-3":      _render_s6_3,
