@@ -20,12 +20,209 @@ from services.research_agent.schema import ResearchBrief
 DEFAULT_FOLDER_ID = "1L-zcN4jA83EfsrRyei_ewbKOEKMKz-lC"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-# Fields that carry no human value and should never appear in the document.
 _SKIP_ALWAYS = {"research_type"}
 
-# Threshold (chars) above which a string gets its own heading + paragraph
-# rather than being rendered as "Label: value" on one line.
+# Metadata fields that add noise inside nested models — hidden from body
+_SKIP_NESTED = {"sources", "confidence", "reliability_score", "fetched_at"}
+
+# Chars above which a string gets its own heading + paragraph vs. "Label: value" inline
 _PROSE_THRESHOLD = 120
+
+# Human-readable names for every research type
+_TYPE_NAMES: dict[str, str] = {
+    "LOBBY-1": "Lobbyist Registration Check",
+    "PW-1":    "Conference Attendee Research",
+    "PW-3":    "Municipality Background Research",
+    "S1-2":    "LinkedIn Connection Prep",
+    "S1-4":    "Contact Background Research",
+    "S3-PREP": "Pre-Meeting Research Package",
+    "S3-3":    "Commission Meeting Prep",
+    "S4-DECK": "Presentation Deck Research",
+    "S5-1":    "Internal Presentation Prep",
+    "S5-2":    "Post-Meeting Debrief",
+    "S6-1":    "Grant Opportunity Research",
+    "S6-2":    "Project Narrative Draft",
+    "S6-3":    "Commission Presentation Prep",
+    "S7-1":    "Post-Event Debrief",
+    "S8-1":    "Political Landscape Mapping",
+    "S8-2":    "Community Support Letter",
+    "S8-3":    "Politician-Friendly Briefing",
+    "S9-1":    "Project Kickoff Deck",
+    "S9-2":    "Media & Reporter Research",
+    "S9-3":    "Grant Compliance Checklist",
+    "S9-4":    "P3 Proposal & RFP Draft",
+    "S9-5":    "Partnership Agreement Summary",
+    "S10-1":   "Project Case Study",
+    "S10-2":   "Referral Outreach Research",
+}
+
+# Override auto-generated Title Case labels with friendlier names
+_FIELD_LABELS: dict[str, str] = {
+    "connection_request_message":        "Connection Request",
+    "follow_up_message_if_no_reply":     "Follow-Up Message (No Reply)",
+    "common_ground_hooks":               "Common Ground",
+    "environmental_signals":             "Environmental Signals",
+    "three_week_action_plan":            "3-Week Action Plan",
+    "per_commissioner_briefs":           "Commissioner Notes",
+    "agenda_summary_plain_language":     "Agenda Summary",
+    "agenda_items_affecting_chawq":      "Items Affecting C-HAWQ",
+    "anticipated_objections":            "Anticipated Objections",
+    "top_objections":                    "Top Objections",
+    "five_slide_outline":                "5-Slide Outline",
+    "political_objection_responses":     "Objection Responses",
+    "local_angle":                       "Local Angle",
+    "leave_behind":                      "Leave-Behind",
+    "suggested_ask":                     "Suggested Ask",
+    "why_chawq_answer":                  "Why C-HAWQ?",
+    "six_month_checkin_email":           "6-Month Check-In Email",
+    "warm_intro_email":                  "Warm Intro Email",
+    "thank_you_email":                   "Thank-You Email",
+    "recommended_next_action":           "Recommended Next Action",
+    "remaining_blockers_before_step_6":  "Remaining Blockers",
+    "best_chawq_talking_point":          "Best C-HAWQ Talking Point",
+    "program_requirements_summary":      "Program Requirements",
+    "compliance_checklist":              "Compliance Checklist",
+    "day_one_records":                   "Day-One Records to Establish",
+    "common_pitfalls":                   "Common Pitfalls",
+    "proposal_sections":                 "Proposal Sections",
+    "complexity_factors":                "Complexity Factors",
+    "gc_evaluation_criteria":            "GC Evaluation Criteria",
+    "procurement_conflicts":             "Procurement Conflicts",
+    "plain_language_summary":            "Plain-Language Summary",
+    "risk_flags":                        "Risk Flags",
+    "attorney_questions":                "Questions for Your Attorney",
+    "one_sided_terms":                   "One-Sided Terms",
+    "complexity_factors_covered":        "Complexity Factors Coverage",
+    "leave_behind_case_study":           "Leave-Behind Case Study",
+    "website_highlight":                 "Website Highlight",
+    "press_pitch":                       "Press Pitch",
+    "pull_quotes":                       "Pull Quotes",
+    "before_after_narrative":            "Before / After Narrative",
+    "before_after_story":                "Before / After Story",
+    "contact_overview":                  "Contact Overview",
+    "recent_projects_or_proposals":      "Recent Projects & Proposals",
+    "follow_up_email_starters":          "Follow-Up Email Starters",
+    "next_48h_actions":                  "Next 48-Hour Actions",
+    "next_event_improvements":           "Improvements for Next Event",
+    "stakeholder_reads":                 "Stakeholder Reads",
+    "key_concerns":                      "Key Concerns",
+    "opening_narrative":                 "Opening Narrative",
+    "department_interests":              "Department Interests",
+    "closing_statement":                 "Closing Statement",
+    "recommended_data_visuals":          "Recommended Data Visuals",
+    "opening_script":                    "Opening Script",
+    "things_not_to_say":                 "What Not to Say",
+    "champion_profile":                  "Champion Profile",
+    "municipality_overview":             "Municipality Overview",
+    "project_intelligence":              "Project Intelligence",
+    "funding_landscape_summary":         "Funding Landscape",
+    "political_landscape_summary":       "Political Landscape",
+    "tailored_discovery_questions":      "Discovery Questions",
+    "custom_chawq_intro":                "C-HAWQ Intro",
+    "grants":                            "Grant Opportunities",
+    "risks_and_disqualifiers":           "Risks & Disqualifiers",
+    "p3_contractors":                    "P3 Contractors",
+    "active_or_stalled_projects":        "Active / Stalled Projects",
+    "recent_budget_news":                "Recent Budget News",
+    "environmental_issues":              "Environmental Issues",
+    "commission_makeup":                 "Commission Makeup",
+    "peer_comparables":                  "Peer Comparables",
+    "commissioner_profiles":             "Commissioner Profiles",
+    "high_leverage_community_voices":    "High-Leverage Community Voices",
+    "top_derailers_and_mitigations":     "Top Derailers & Mitigations",
+    "satellite_imagery_sources":         "Satellite Imagery Sources",
+    "localized_environmental_data":      "Localized Data",
+    "comparable_project_examples":       "Comparable Projects",
+    "human_scale_statistics":            "Human-Scale Statistics",
+    "visual_storytelling_suggestions":   "Visual Storytelling Suggestions",
+    "executive_summary":                 "Executive Summary",
+    "grant_narrative":                   "Grant Narrative",
+    "urgent_statistics":                 "Urgent Statistics",
+    "wire_syndication_assessment":       "Wire Syndication Assessment",
+    "pitch_emails":                      "Pitch Emails",
+    "local_outlets":                     "Local Outlets",
+    "regional_environmental_press":      "Regional Environmental Press",
+    "municipal_trade_press":             "Municipal Trade Press",
+    "beat_reporters":                    "Beat Reporters",
+    "open_items_register":               "Open Items Register",
+    "registration_required":             "Registration Required",
+    "timing_requirement":                "Timing Requirement",
+    "reporting_requirements":            "Reporting Requirements",
+    "county_covers_municipalities":      "County Covers Municipalities",
+    "top_priority_contacts":             "Priority Contacts",
+    "public_statements_on_environment":  "Public Statements on Environment",
+    "projects_or_initiatives_led":       "Projects & Initiatives Led",
+    "municipality_environmental_challenges": "Municipal Environmental Challenges",
+    "mutual_connections":                "Mutual Connections",
+    "personalized_opening_line":         "Personalized Opening Line",
+    "internal_summary":                  "Internal Summary",
+    "public_comment_statement":          "Public Comment Statement",
+    "support_letter":                    "Support Letter",
+    "talking_points_to_emphasize":       "Talking Points to Emphasize",
+    "talking_points_to_avoid":           "Talking Points to Avoid",
+    "likely_position_on_relevant_items": "Likely Position",
+    "special_contract_language_needed":  "Special Contract Language Needed",
+    "suggested_alternative_language":    "Suggested Alternative Language",
+    "conflict_description":              "Conflict",
+    "why_important":                     "Why It Matters",
+    "human_framing":                     "Human Framing",
+    "speaker_notes":                     "Speaker Notes",
+    "bullet_points":                     "Key Points",
+    "suggested_opener":                  "Suggested Opener",
+    "why_effective_for_this_audience":   "Why Effective for This Audience",
+    "why_relevant":                      "Why Relevant",
+    "outcome_summary":                   "Outcome",
+    "most_likely_objection":             "Most Likely Objection",
+    "most_effective_counter":            "Most Effective Counter",
+    "leverage_summary":                  "Leverage",
+    "suggested_action":                  "Suggested Action",
+    "recommended_resolution":            "Recommended Resolution",
+    "likely_owner":                      "Likely Owner",
+    "key_talking_points":                "Key Talking Points",
+    "primary_concerns":                  "Primary Concerns",
+    "email_starter":                     "Email Starter",
+    "suggested_subject":                 "Suggested Subject",
+    "contact_role_or_affiliation":       "Role / Affiliation",
+    "deadline_hours":                    "Deadline (hours)",
+    "suggested_improvement":             "Suggested Improvement",
+    "relevant_beat":                     "Relevant Beat",
+    "recent_relevant_byline":            "Recent Byline",
+    "target_outlet_or_reporter":         "Target",
+    "documentation_needed":              "Documentation Needed",
+    "documentation_required":            "Documentation Required",
+    "p3_compatible":                     "P3 Compatible",
+    "typical_award_usd_min":             "Typical Award (min)",
+    "typical_award_usd_max":             "Typical Award (max)",
+    "eligibility_summary":               "Eligibility",
+    "deadline_or_cycle":                 "Deadline / Cycle",
+    "florida_precedents":                "Florida Precedents",
+    "prior_environmental_involvement":   "Prior Environmental Involvement",
+    "public_statements":                 "Public Statements",
+    "background_summary":                "Background",
+    "intro_potential":                   "Intro Potential",
+    "affects_chawq_project":             "Affects C-HAWQ Project",
+    "impact_description":                "Impact",
+    "item_number":                       "Item #",
+    "environmental_stance":              "Environmental Stance",
+    "seat_or_district":                  "Seat / District",
+    "waterbody_or_location":             "Waterbody / Location",
+    "imagery_provider":                  "Imagery Provider",
+    "suggested_view":                    "Suggested View",
+    "cost_usd":                          "Cost",
+    "award_usd":                         "Award",
+    "start_year":                        "Start",
+    "end_year":                          "End",
+    "tenure_years":                      "Tenure",
+    "last_known_update":                 "Last Known Update",
+    "issue_type":                        "Issue Type",
+    "project_executed":                  "Project Executed",
+    "term_or_section":                   "Term / Section",
+    "weight_or_priority":                "Priority",
+    "commissioner_type_likely":          "Likely Commissioner Type",
+    "likely_source":                     "Likely Source",
+    "name_or_org":                       "Name / Organization",
+    "name_or_role":                      "Name / Role",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -49,12 +246,10 @@ def filename_for(brief: ResearchBrief, ext: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _label(field_name: str) -> str:
-    """snake_case → Title Case for display."""
-    return field_name.replace("_", " ").title()
+    return _FIELD_LABELS.get(field_name) or field_name.replace("_", " ").title()
 
 
 def _item_heading(obj: Any, index: int) -> str:
-    """Pick the most descriptive field from a list-item model for its heading."""
     for attr in (
         "name", "outlet_name", "contact_name", "firm_name",
         "section_title", "requirement", "criterion", "factor",
@@ -68,21 +263,41 @@ def _item_heading(obj: Any, index: int) -> str:
     return f"Item {index}"
 
 
+def _render_email_draft(doc: Any, email: Any) -> None:
+    p = doc.add_paragraph()
+    p.add_run("Subject: ").bold = True
+    p.add_run(email.subject)
+    doc.add_paragraph(email.body)
+
+
 def _render_value(doc: Any, value: Any, level: int) -> None:
-    """Recursively render a value into *doc* at heading *level*."""
     from pydantic import BaseModel
+    from services.research_agent.schema import Claim, EmailDraft
 
     if value is None or value == "" or value == []:
         return
 
-    if isinstance(value, str):
+    if isinstance(value, EmailDraft):
+        _render_email_draft(doc, value)
+
+    elif isinstance(value, Claim):
+        doc.add_paragraph(value.statement, style="List Bullet")
+
+    elif isinstance(value, str):
         doc.add_paragraph(value)
 
-    elif isinstance(value, (int, float, bool)):
+    elif isinstance(value, (int, float)):
         doc.add_paragraph(str(value))
 
+    elif isinstance(value, bool):
+        doc.add_paragraph("Yes" if value else "No")
+
     elif isinstance(value, list):
-        if all(isinstance(v, str) for v in value):
+        from services.research_agent.schema import Claim as _Claim
+        if all(isinstance(v, _Claim) for v in value):
+            for claim in value:
+                doc.add_paragraph(claim.statement, style="List Bullet")
+        elif all(isinstance(v, str) for v in value):
             for item in value:
                 doc.add_paragraph(item, style="List Bullet")
         else:
@@ -90,20 +305,20 @@ def _render_value(doc: Any, value: Any, level: int) -> None:
                 if isinstance(item, BaseModel):
                     heading_text = _item_heading(item, i)
                     doc.add_heading(heading_text, min(level, 9))
-                    _render_model(doc, item, level + 1, skip_fields=set())
+                    _render_model(doc, item, level + 1, skip_fields=_SKIP_NESTED)
                 else:
                     doc.add_paragraph(str(item), style="List Bullet")
 
     elif isinstance(value, BaseModel):
-        _render_model(doc, value, level, skip_fields=set())
+        _render_model(doc, value, level, skip_fields=_SKIP_NESTED)
 
     else:
         doc.add_paragraph(str(value))
 
 
 def _render_model(doc: Any, model: Any, level: int, skip_fields: set) -> None:
-    """Render all fields of a Pydantic model into *doc*."""
     from pydantic import BaseModel
+    from services.research_agent.schema import Claim, EmailDraft
 
     for field_name in model.model_fields:
         if field_name in skip_fields:
@@ -114,7 +329,18 @@ def _render_model(doc: Any, model: Any, level: int, skip_fields: set) -> None:
 
         field_label = _label(field_name)
 
-        if isinstance(value, str) and len(value) > _PROSE_THRESHOLD:
+        # EmailDraft → email format
+        if isinstance(value, EmailDraft):
+            doc.add_heading(field_label, min(level, 9))
+            _render_email_draft(doc, value)
+
+        # list[Claim] → clean bullet statements, no metadata
+        elif isinstance(value, list) and value and all(isinstance(v, Claim) for v in value):
+            doc.add_heading(field_label, min(level, 9))
+            for claim in value:
+                doc.add_paragraph(claim.statement, style="List Bullet")
+
+        elif isinstance(value, str) and len(value) > _PROSE_THRESHOLD:
             doc.add_heading(field_label, min(level, 9))
             doc.add_paragraph(value)
 
@@ -139,7 +365,7 @@ def _render_model(doc: Any, model: Any, level: int, skip_fields: set) -> None:
 
         elif isinstance(value, BaseModel):
             doc.add_heading(field_label, min(level, 9))
-            _render_model(doc, value, level + 1, skip_fields=set())
+            _render_model(doc, value, level + 1, skip_fields=_SKIP_NESTED)
 
 
 def render_docx(brief: ResearchBrief) -> bytes:
@@ -148,11 +374,13 @@ def render_docx(brief: ResearchBrief) -> bytes:
 
     doc = Document()
 
-    # ---- Title and metadata ------------------------------------------------
+    # ---- Title ---------------------------------------------------------------
+    step_name = _TYPE_NAMES.get(brief.research_type_id, brief.research_type_id)
     doc.add_heading(
-        f"{brief.research_type_id} — {brief.municipality_name or 'Brief'}", 0
+        f"{step_name} — {brief.municipality_name or 'Brief'}", 0
     )
 
+    # ---- Metadata ------------------------------------------------------------
     meta = doc.add_paragraph()
     meta.add_run("Generated: ").bold = True
     meta.add_run(brief.generated_at.strftime("%B %d, %Y at %H:%M UTC"))
@@ -161,23 +389,19 @@ def render_docx(brief: ResearchBrief) -> bytes:
     meta.add_run("     Run: ").bold = True
     meta.add_run(brief.run_id[:8])
 
-    # ---- Findings ----------------------------------------------------------
-    doc.add_heading("Findings", 1)
-    _render_model(doc, brief.findings, level=2, skip_fields=_SKIP_ALWAYS)
+    # ---- Findings ------------------------------------------------------------
+    _render_model(doc, brief.findings, level=1, skip_fields=_SKIP_ALWAYS)
 
-    # ---- Agent notes -------------------------------------------------------
+    # ---- Agent notes ---------------------------------------------------------
     if brief.notes:
         doc.add_heading("Notes", 1)
         doc.add_paragraph(brief.notes)
 
-    # ---- Sources -----------------------------------------------------------
+    # ---- Sources -------------------------------------------------------------
     if brief.sources_consulted:
-        doc.add_heading("Sources Consulted", 1)
+        doc.add_heading("Sources", 1)
         for s in brief.sources_consulted:
-            doc.add_paragraph(
-                f"{s.url}  (reliability {s.reliability_score:.2f})",
-                style="List Bullet",
-            )
+            doc.add_paragraph(str(s.url), style="List Bullet")
 
     buf = io.BytesIO()
     doc.save(buf)
