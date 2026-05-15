@@ -1,11 +1,11 @@
-"""Upload validated ResearchBriefs to Google Drive.
+"""Upload validated ResearchBriefs to Google Drive as Word documents.
 
 Auth precedence: DRIVE_SA_EMAIL (impersonate via ADC) > DRIVE_SA_KEY (file) > ADC.
 
 Usage:
     from services.research_agent.drive_sync import upload_brief
-    results = upload_brief(brief, folder_id="1L-zcN4jA83EfsrRyei_ewbKOEKMKz-lC")
-    # results = {"json": {...Drive file metadata...}, "markdown": {...}}
+    result = upload_brief(brief, folder_id="1L-zcN4jA83EfsrRyei_ewbKOEKMKz-lC")
+    # result = {"docx": {...Drive file metadata...}}
 """
 from __future__ import annotations
 
@@ -13,11 +13,24 @@ import io
 import os
 import re
 import sys
+from typing import Any
 
 from services.research_agent.schema import ResearchBrief
 
 DEFAULT_FOLDER_ID = "1L-zcN4jA83EfsrRyei_ewbKOEKMKz-lC"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+# Fields that carry no human value and should never appear in the document.
+_SKIP_ALWAYS = {"research_type"}
+
+# Threshold (chars) above which a string gets its own heading + paragraph
+# rather than being rendered as "Label: value" on one line.
+_PROSE_THRESHOLD = 120
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
 
 def _slug(text: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "_", (text or "unknown").lower()).strip("_")
@@ -31,56 +44,149 @@ def filename_for(brief: ResearchBrief, ext: str) -> str:
     )
 
 
-def render_markdown(brief: ResearchBrief) -> str:
-    lines = [f"# {brief.research_type_id} — {brief.municipality_name or 'Brief'}", ""]
-    lines.append(f"**Generated:** {brief.generated_at.strftime('%B %d, %Y at %H:%M UTC')}")
-    lines.append(f"**Run ID:** `{brief.run_id}`")
-    lines.append(f"**Overall confidence:** {brief.overall_confidence:.2f}")
-    lines.append("")
+# ---------------------------------------------------------------------------
+# Word document renderer
+# ---------------------------------------------------------------------------
 
-    f = brief.findings
-    if f.research_type == "S6-1":
-        lines.append("## Grants\n")
-        for i, g in enumerate(f.grants, 1):
-            lines.append(f"### {i}. {g.name}")
-            lines.append(f"*{g.administering_agency}* (confidence {g.confidence:.2f})\n")
-            if g.typical_award_usd_min and g.typical_award_usd_max:
-                lines.append(f"- Award: ${g.typical_award_usd_min:,}–${g.typical_award_usd_max:,}")
-            lines.append(f"- Deadline: {g.deadline_or_cycle}")
-            lines.append(f"- P3: {g.p3_compatible}")
-            lines.append(f"- Eligibility: {g.eligibility_summary}")
-            lines.append(f"- Page: {g.program_url}\n")
-        if f.risks_and_disqualifiers:
-            lines.append("## Risks\n")
-            for r in f.risks_and_disqualifiers:
-                lines.append(f"- **[{r.severity.upper()}]** {r.description}")
-                if r.mitigation:
-                    lines.append(f"  - Mitigation: {r.mitigation}")
+def _label(field_name: str) -> str:
+    """snake_case → Title Case for display."""
+    return field_name.replace("_", " ").title()
 
-    elif f.research_type == "PW-3":
-        if f.leadership:
-            lines += ["## Leadership", ""]
-            for p in f.leadership:
-                lines.append(f"- **{p.name}** — {p.role}")
-        if f.environmental_issues:
-            lines += ["", "## Environmental Issues", ""]
-            for issue in f.environmental_issues:
-                lines.append(f"- [{issue.severity.upper()}] {issue.issue}")
 
-    elif f.research_type in ("S3-PREP", "S3-3", "LOBBY-1", "PW-1",
-                              "S1-2", "S1-4", "S4-DECK", "S8-1"):
-        lines.append(f"## {f.research_type} Brief\n")
-        lines.append(f"*See attached JSON for full structured output.*")
+def _item_heading(obj: Any, index: int) -> str:
+    """Pick the most descriptive field from a list-item model for its heading."""
+    for attr in (
+        "name", "outlet_name", "contact_name", "firm_name",
+        "section_title", "requirement", "criterion", "factor",
+        "question", "objection", "pitfall", "standard_term",
+        "term_or_section", "action", "task", "department",
+        "slide_number", "week",
+    ):
+        val = getattr(obj, attr, None)
+        if val is not None:
+            return str(val)
+    return f"Item {index}"
 
+
+def _render_value(doc: Any, value: Any, level: int) -> None:
+    """Recursively render a value into *doc* at heading *level*."""
+    from pydantic import BaseModel
+
+    if value is None or value == "" or value == []:
+        return
+
+    if isinstance(value, str):
+        doc.add_paragraph(value)
+
+    elif isinstance(value, (int, float, bool)):
+        doc.add_paragraph(str(value))
+
+    elif isinstance(value, list):
+        if all(isinstance(v, str) for v in value):
+            for item in value:
+                doc.add_paragraph(item, style="List Bullet")
+        else:
+            for i, item in enumerate(value, 1):
+                if isinstance(item, BaseModel):
+                    heading_text = _item_heading(item, i)
+                    doc.add_heading(heading_text, min(level, 9))
+                    _render_model(doc, item, level + 1, skip_fields=set())
+                else:
+                    doc.add_paragraph(str(item), style="List Bullet")
+
+    elif isinstance(value, BaseModel):
+        _render_model(doc, value, level, skip_fields=set())
+
+    else:
+        doc.add_paragraph(str(value))
+
+
+def _render_model(doc: Any, model: Any, level: int, skip_fields: set) -> None:
+    """Render all fields of a Pydantic model into *doc*."""
+    from pydantic import BaseModel
+
+    for field_name in model.model_fields:
+        if field_name in skip_fields:
+            continue
+        value = getattr(model, field_name)
+        if value is None or value == "" or value == []:
+            continue
+
+        field_label = _label(field_name)
+
+        if isinstance(value, str) and len(value) > _PROSE_THRESHOLD:
+            doc.add_heading(field_label, min(level, 9))
+            doc.add_paragraph(value)
+
+        elif isinstance(value, str):
+            p = doc.add_paragraph()
+            p.add_run(f"{field_label}: ").bold = True
+            p.add_run(value)
+
+        elif isinstance(value, (int, float)):
+            p = doc.add_paragraph()
+            p.add_run(f"{field_label}: ").bold = True
+            p.add_run(str(value))
+
+        elif isinstance(value, bool):
+            p = doc.add_paragraph()
+            p.add_run(f"{field_label}: ").bold = True
+            p.add_run("Yes" if value else "No")
+
+        elif isinstance(value, list) and value:
+            doc.add_heading(field_label, min(level, 9))
+            _render_value(doc, value, level + 1)
+
+        elif isinstance(value, BaseModel):
+            doc.add_heading(field_label, min(level, 9))
+            _render_model(doc, value, level + 1, skip_fields=set())
+
+
+def render_docx(brief: ResearchBrief) -> bytes:
+    """Render a ResearchBrief as a Word document and return the raw bytes."""
+    from docx import Document
+
+    doc = Document()
+
+    # ---- Title and metadata ------------------------------------------------
+    doc.add_heading(
+        f"{brief.research_type_id} — {brief.municipality_name or 'Brief'}", 0
+    )
+
+    meta = doc.add_paragraph()
+    meta.add_run("Generated: ").bold = True
+    meta.add_run(brief.generated_at.strftime("%B %d, %Y at %H:%M UTC"))
+    meta.add_run("     Confidence: ").bold = True
+    meta.add_run(f"{brief.overall_confidence:.2f}")
+    meta.add_run("     Run: ").bold = True
+    meta.add_run(brief.run_id[:8])
+
+    # ---- Findings ----------------------------------------------------------
+    doc.add_heading("Findings", 1)
+    _render_model(doc, brief.findings, level=2, skip_fields=_SKIP_ALWAYS)
+
+    # ---- Agent notes -------------------------------------------------------
     if brief.notes:
-        lines += ["", "## Agent Notes", "", brief.notes]
+        doc.add_heading("Notes", 1)
+        doc.add_paragraph(brief.notes)
+
+    # ---- Sources -----------------------------------------------------------
     if brief.sources_consulted:
-        lines += ["", "## Sources Consulted", ""]
+        doc.add_heading("Sources Consulted", 1)
         for s in brief.sources_consulted:
-            lines.append(f"- {s.url} (reliability {s.reliability_score:.2f})")
+            doc.add_paragraph(
+                f"{s.url}  (reliability {s.reliability_score:.2f})",
+                style="List Bullet",
+            )
 
-    return "\n".join(lines)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
 
+
+# ---------------------------------------------------------------------------
+# Drive upload
+# ---------------------------------------------------------------------------
 
 def _get_drive_service():
     try:
@@ -110,7 +216,7 @@ def _get_drive_service():
                 return False
 
             def refresh(self, request):
-                pass  # static token — nothing to refresh
+                pass
 
             def before_request(self, request, method, url, headers):
                 self.apply(headers)
@@ -137,12 +243,13 @@ def _get_drive_service():
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
-def _upload_or_replace(service, filename: str, content: str,
-                        mime_type: str, folder_id: str) -> dict:
+def _upload_or_replace(
+    service, filename: str, content: bytes, mime_type: str, folder_id: str
+) -> dict:
     from googleapiclient.http import MediaIoBaseUpload
 
     media = MediaIoBaseUpload(
-        io.BytesIO(content.encode("utf-8")), mimetype=mime_type, resumable=False
+        io.BytesIO(content), mimetype=mime_type, resumable=False
     )
     existing = service.files().list(
         q=f"name = '{filename}' and '{folder_id}' in parents and trashed = false",
@@ -170,22 +277,20 @@ def _upload_or_replace(service, filename: str, content: str,
 def upload_brief(
     brief: ResearchBrief,
     folder_id: str = DEFAULT_FOLDER_ID,
-    upload_json: bool = True,
-    upload_markdown: bool = True,
 ) -> dict[str, dict]:
-    """Upload brief as JSON and/or Markdown to Drive. Returns file metadata per format."""
+    """Upload brief as JSON + Word doc to Drive. Returns file metadata per format."""
     service = _get_drive_service()
-    results: dict[str, dict] = {}
 
-    if upload_json:
-        results["json"] = _upload_or_replace(
+    json_bytes = brief.model_dump_json(indent=2).encode("utf-8")
+    docx_bytes = render_docx(brief)
+
+    return {
+        "json": _upload_or_replace(
             service, filename_for(brief, "json"),
-            brief.model_dump_json(indent=2), "application/json", folder_id,
-        )
-    if upload_markdown:
-        results["markdown"] = _upload_or_replace(
-            service, filename_for(brief, "md"),
-            render_markdown(brief), "text/markdown", folder_id,
-        )
-
-    return results
+            json_bytes, "application/json", folder_id,
+        ),
+        "docx": _upload_or_replace(
+            service, filename_for(brief, "docx"),
+            docx_bytes, DOCX_MIME, folder_id,
+        ),
+    }

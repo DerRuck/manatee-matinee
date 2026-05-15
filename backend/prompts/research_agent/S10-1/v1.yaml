@@ -1,0 +1,179 @@
+# Runtime prompt for the S10-1 Project Case Study type.
+# Path: prompts/research_agent/S10-1/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S10-1
+name: Project Case Study
+version: 1
+binder_anchor: ppb_S10_s10_1_project_case_study
+description: >
+  Writes all written assets for a completed project at Step 10. Produces
+  a 1-page sales leave-behind case study, a 300-word website highlight,
+  a 2-paragraph national media pitch, three pull quotes, and a before/
+  after narrative for public audiences. Champion approval required
+  before any content is published.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.5
+  max_tokens: 12000
+
+inputs:
+  required:
+    - name: project_name
+      source: ghl.project.name
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: county
+      source: ghl.contact.county
+    - name: project_type
+      source: ghl.contact.project_type
+    - name: project_scope
+      source: ghl.project.scope_description
+      description: "What was done — acres restored, linear feet improved, systems installed, etc."
+    - name: key_outcomes
+      source: ghl.project.outcomes
+      description: "Before/after data: acres restored, water quality metrics, species returned, community events"
+    - name: total_cost_usd
+      source: ghl.project.total_cost_usd
+    - name: funding_sources
+      source: ghl.project.funding_sources
+      description: "Grants, P3 capital, and municipal contribution breakdown"
+    - name: champion_name
+      source: ghl.contact.full_name
+    - name: champion_title
+      source: ghl.contact.title
+  optional:
+    - name: project_duration
+      source: ghl.project.duration
+      description: "Start to finish — e.g., '18 months'"
+    - name: champion_motivation
+      source: ghl.contact.champion_motivation
+      description: "What drove the Champion to take this on"
+    - name: community_impact
+      source: ghl.project.community_benefit
+      description: "Who benefited, how many people, any notable events or community engagement"
+    - name: challenges_overcome
+      source: ghl.project.challenges
+    - name: champion_quotes
+      source: ghl.contact.champion_quotes
+
+system: |
+  You are C-HAWQ's Research Agent in case study mode. C-HAWQ is a
+  Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. A project is complete. Your job is to document
+  the win in a way that fuels the next ten engagements.
+
+  The municipality is the hero. The Champion is the protagonist. C-HAWQ
+  is the supporting organization that made it possible. Every asset
+  must be written with that hierarchy.
+
+  These assets will be used in:
+  - Future sales conversations (leave-behind)
+  - C-HAWQ website
+  - National media pitches
+  - Conference submissions
+  - Future grant applications
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Use them to verify any specific data points, look up the project
+    site, or find any media coverage that has already run on this
+    project.
+  - Also search for comparable Florida projects to provide context
+    for the media pitch on why this project is nationally significant.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S10-1".
+  - leave_behind_case_study: ~400-500 words. Professional. Outcome-
+    focused. Leads with the community problem, describes the solution
+    and partnership, quantifies the results, closes with a quote from
+    the Champion. Written for a city manager reading it in 90 seconds
+    before a meeting.
+  - website_highlight: ~300 words. Engaging. Written in third person.
+    Leads with the human story. Suitable for chawq.org. SEO-friendly
+    but not at the expense of readability.
+  - press_pitch: 2 paragraphs. Explains why this project is worth
+    covering nationally — what's new, what's replicable, why a
+    reader in any coastal city should care. Written for environmental
+    or water industry editors.
+  - pull_quotes: exactly 3 headline-worthy sentences. Each should be
+    self-contained and emotionally or statistically compelling. These
+    are the sentences a designer would pull out and put on a poster.
+  - before_after_narrative: 150-250 words. Written for a general
+    public audience. Paint the picture. Specific to this place.
+    Before: the problem. After: what changed. Make it feel real.
+
+user: |
+  Write the Step 10 case study assets for:
+
+  - Project: {{ project_name }}
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Project type: {{ project_type }}
+  - Scope: {{ project_scope }}
+  - Key outcomes: {{ key_outcomes }}
+  - Total cost: ${{ "{:,}".format(total_cost_usd) }}
+  - Funding: {{ funding_sources }}
+  - Champion: {{ champion_name }}, {{ champion_title }}
+  {%- if project_duration %}
+  - Duration: {{ project_duration }}
+  {%- endif %}
+  {%- if champion_motivation %}
+  - What drove the Champion: {{ champion_motivation }}
+  {%- endif %}
+  {%- if community_impact %}
+  - Community impact: {{ community_impact }}
+  {%- endif %}
+  {%- if challenges_overcome %}
+  - Challenges overcome: {{ challenges_overcome }}
+  {%- endif %}
+  {%- if champion_quotes %}
+  - Champion quotes: {{ champion_quotes }}
+  {%- endif %}
+
+  Produce five written assets:
+
+  1. Leave-behind case study (~400-500 words) — professional, outcome-
+     focused, for a city manager reading it in 90 seconds. Lead with
+     the community problem. Describe the partnership and solution.
+     Quantify the results. Close with a Champion quote if available.
+
+  2. Website highlight (~300 words) — third person, human story first.
+     Engaging and accessible. Suitable for chawq.org.
+
+  3. Press pitch (2 paragraphs) — why this project is worth covering
+     nationally. What's new. What's replicable. Why any coastal city
+     should care. Written for environmental or water industry editors.
+
+  4. Pull quotes (exactly 3) — headline-worthy sentences that are
+     self-contained and emotionally or statistically compelling.
+
+  5. Before/after narrative (150-250 words) — for a general public
+     audience. Paint the picture before the project and after.
+     Specific to {{ municipality_name }}.
+
+  Return as a ResearchBrief with findings.research_type = "S10-1".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 10
+    chunk_types: [criteria, checklist]
+    limit: 3
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+evals:
+  golden_cases_file: evals/research_agent/S10-1/golden.jsonl
+  min_pass_rate: 0.82

@@ -1,0 +1,152 @@
+# Runtime prompt for the S7-1 Post-Event Debrief type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S7-1) is reference-only.
+#
+# Path: prompts/research_agent/S7-1/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S7-1
+name: Post-Event Debrief
+version: 1
+binder_anchor: ppb_S07_s7_1_post_event_debrief
+description: >
+  Analyzes a Plaud Pin transcript or field notes from a Step 7 community
+  event and produces a structured debrief. Auto-fires when event notes are
+  submitted to GHL after a Step 7 deployment. Outputs an internal summary,
+  personalized follow-up email starters for top new contacts, next 48-hour
+  action items, and recommendations to improve future events.
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 10000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: event_name
+      source: ghl.event.name
+      example: "Bayview Waterfront Festival"
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: event_date
+      source: ghl.event.date
+      example: "2026-07-20"
+    - name: event_notes
+      source: ghl.contact.step7_event_notes
+      description: >
+        Plaud Pin transcript or field notes — who attended, conversations
+        held, questions from the public, notable moments, problems
+  optional:
+    - name: new_contacts
+      source: ghl.event.new_contacts
+      description: "Names, roles/affiliations, and conversation notes for contacts collected at the event"
+    - name: project_description
+      source: ghl.project.overview
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in post-event debrief mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. The team just ran a Step 7 community engagement
+  event deploying the mobile science-museum experience. Your job is to
+  turn raw event notes or a Plaud Pin transcript into a structured debrief
+  the team can act on immediately.
+
+  The debrief has three audiences:
+  1. The C-HAWQ team — needs a clear internal summary of what happened
+     and what to do next
+  2. New contacts from the event — need personalized follow-up email
+     starters within 48 hours
+  3. The project file — needs an honest assessment of what worked
+     and what should change at the next event
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Use them only if a specific contact, organization, or topic from the
+    event notes warrants a quick lookup to personalize a follow-up or
+    understand context. Most debrief runs won't need search.
+  - Do not search for the sake of it.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S7-1".
+  - internal_summary: 2-3 paragraphs. Written for the C-HAWQ team to
+    read the morning after the event. What happened, who showed up,
+    what landed, what didn't, and what it means for the project.
+    Direct and honest — no spin.
+  - follow_up_email_starters: one entry per significant new contact
+    (max 5). Each must reference something specific the person said
+    or did at the event — not a generic "great meeting you." Include
+    a suggested subject line.
+  - next_48h_actions: concrete, owner-assigned actions (c-hawq,
+    champion, or shared). Include a deadline in hours from event end.
+    Minimum: follow-up emails sent, GHL updated, team summary shared.
+  - next_event_improvements: honest observations on what would make
+    the next deployment more effective. Grounded in something specific
+    from the notes.
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Debrief this Step 7 community event:
+
+  - Event: {{ event_name }}
+  - Municipality: {{ municipality_name }}
+  - Date: {{ event_date }}
+  {%- if project_description %}
+  - Project: {{ project_description }}
+  {%- endif %}
+
+  Event notes / transcript:
+  {{ event_notes }}
+  {%- if new_contacts %}
+
+  New contacts collected:
+  {{ new_contacts }}
+  {%- endif %}
+
+  Produce:
+
+  1. Internal summary — 2-3 paragraphs for the C-HAWQ team. What
+     happened, who engaged, what resonated with the public, what
+     didn't, and what it means for the project's political momentum.
+     Honest and direct.
+
+  2. Follow-up email starters — For each significant new contact
+     (max 5): a personalized opening that references something
+     specific from the conversation, plus a suggested subject line.
+     These are starters, not full emails — 2-3 sentences each.
+
+  3. Next 48-hour actions — Every action that must happen within
+     48 hours of the event. For each: the action, who owns it
+     (c-hawq, champion, or shared), and deadline in hours.
+
+  4. Next event improvements — Specific observations on what would
+     make the next C-HAWQ community deployment more effective.
+     Each must be grounded in something from the notes.
+
+  Return as a ResearchBrief with findings.research_type = "S7-1".
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 7
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 3
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S7-1/golden.jsonl
+  min_pass_rate: 0.80

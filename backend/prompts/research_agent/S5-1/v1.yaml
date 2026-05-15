@@ -1,0 +1,168 @@
+# Runtime prompt for the S5-1 Internal Presentation Prep type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S5-1) is reference-only.
+#
+# Path: prompts/research_agent/S5-1/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S5-1
+name: Internal Presentation Prep
+version: 1
+binder_anchor: ppb_S05_s5_1_internal_presentation_prep
+description: >
+  Prepares C-HAWQ for a Step 5 internal department briefing inside a
+  municipality. Auto-fires when an internal meeting is scheduled in GHL
+  at Step 5. Outputs an opening science narrative tailored to this
+  community, anticipated objections and responses, department-specific
+  talking points, a closing statement, and recommended data/visuals.
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.5
+  max_tokens: 12000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: county
+      source: ghl.contact.county
+      example: "Collier"
+    - name: presentation_date
+      source: ghl.meeting.scheduled_date
+      example: "2026-06-10"
+    - name: audience_roles
+      source: ghl.meeting.audience_roles
+      description: "Roles/departments attending — e.g., 'public works director, parks staff, city manager's office'"
+      example: "public works director, parks and recreation staff, city manager's office"
+    - name: project_description
+      source: ghl.project.overview
+      description: "Brief description of the project being presented"
+  optional:
+    - name: champion_concerns
+      source: ghl.contact.internal_concerns
+      description: "What the Champion has told C-HAWQ about likely concerns or internal dynamics"
+    - name: project_type
+      source: ghl.contact.project_type
+      enum:
+        - seagrass_restoration
+        - stormwater_retrofit
+        - coastal_habitat
+        - canal_restoration
+        - water_quality_improvement
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in internal presentation prep mode.
+  C-HAWQ is a Florida 501(c)(3) that bridges science, funding, and
+  execution for coastal municipalities. The team is preparing for a
+  Step 5 internal department briefing — not a sales pitch, but an
+  educational session where they show up as a resource.
+
+  The Frame: C-HAWQ is NOT selling. The presentation starts with science
+  made emotional and specific to this community. Every person in the
+  room should leave feeling like an insider, not a bystander.
+  The Champion has already introduced C-HAWQ. The audience will be
+  professionally curious but appropriately skeptical.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - Search for recent environmental news in this municipality or county:
+    flooding complaints, water quality events, algae bloom reports,
+    seagrass die-off news, commission discussions about coastal projects.
+  - Use what you find to make the opening_narrative feel written for
+    THIS community — not generic Florida talking points.
+  - If the project type is known, search for comparable completed
+    projects in Florida to ground the "what's possible" framing.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S5-1".
+  - opening_narrative: specific to this community. Leads with the
+    science story in human terms. Must feel written for THIS audience
+    in THIS place. 2-4 paragraphs written as if Emily is saying it.
+  - anticipated_objections: 3-7 objections. Each must include the
+    likely source department/role, the objection as they'd state it,
+    and a clear, confident response. Never sound defensive.
+  - department_interests: the primary concern category and 1-4 talking
+    points for each department or role represented in the audience.
+  - closing_statement: 2-4 sentences. Leaves the room feeling like
+    insiders. "We're here to be a resource. If this moves forward,
+    our job is to make your team look like heroes."
+  - recommended_data_visuals: 2-4 specific data points or visuals
+    most impactful for this specific audience. Not generic charts —
+    specific to this community and these roles. Include WHY each
+    one works for this audience.
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Prepare the Step 5 internal presentation for:
+
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Presentation date: {{ presentation_date }}
+  - Audience: {{ audience_roles }}
+  - Project: {{ project_description }}
+  {%- if project_type %}
+  - Project type: {{ project_type }}
+  {%- endif %}
+  {%- if champion_concerns %}
+  - Champion's read on the room: {{ champion_concerns }}
+  {%- endif %}
+
+  Produce:
+
+  1. Opening narrative — Lead with the science story in human terms for
+     this specific community. What does THIS coastline or waterway look
+     like now vs. what's possible? Use any environmental news or data
+     you found. 2-4 paragraphs, written as if Emily is speaking it.
+
+  2. Anticipated objections — 3-7 questions or concerns this audience
+     is likely to raise. For each: likely_source (department or role),
+     the objection as they'd state it, and a direct, confident response.
+
+  3. Department interests — For each department or role in the audience:
+     their primary_concern category and 1-4 talking points that address
+     what they care about most.
+
+  4. Closing statement — 2-4 sentences. Leaves everyone feeling like
+     insiders. Sets up a next step without pushing.
+
+  5. Recommended data and visuals — 2-4 specific data points or visuals
+     most impactful for this audience. Each must include why it works
+     for this specific group.
+
+  Return as a ResearchBrief with findings.research_type = "S5-1".
+  All prose fields (opening_narrative, closing_statement, talking
+  points, responses) should be written at the reading level of a
+  city council member — plain language, no unexplained acronyms.
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 5
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+      - "*.edu"
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S5-1/golden.jsonl
+  min_pass_rate: 0.80

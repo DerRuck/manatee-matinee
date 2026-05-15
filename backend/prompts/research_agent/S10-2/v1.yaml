@@ -1,0 +1,159 @@
+# Runtime prompt for the S10-2 Referral Outreach Research type.
+# Path: prompts/research_agent/S10-2/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S10-2
+name: Referral Outreach Research
+version: 1
+binder_anchor: ppb_S10_s10_2_referral_outreach_research
+description: >
+  Researches a referral contact or organization introduced by a completed
+  project's Champion. Auto-fires when a referral is logged in GHL at
+  Step 10. Produces a profile of the contact's environmental challenges,
+  their recent public projects and proposals, a warm intro email the
+  Champion can send, and the single best C-HAWQ talking point for
+  this specific audience.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 10000
+
+inputs:
+  required:
+    - name: champion_name
+      source: ghl.contact.full_name
+      description: "The Champion making the referral"
+    - name: champion_municipality
+      source: ghl.contact.municipality_name
+    - name: referral_name
+      source: ghl.referral.contact_name
+      description: "Name of the referral contact or organization"
+  optional:
+    - name: referral_municipality
+      source: ghl.referral.municipality
+    - name: referral_title
+      source: ghl.referral.contact_title
+    - name: referral_known_info
+      source: ghl.referral.known_info
+      description: "Anything already known about the referral — project type, challenges, connection to Champion"
+    - name: completed_project_name
+      source: ghl.project.name
+      description: "The C-HAWQ project the Champion completed — for context in the intro email"
+    - name: completed_project_outcome
+      source: ghl.project.outcomes
+      description: "Brief outcome summary — what was accomplished"
+
+system: |
+  You are C-HAWQ's Research Agent in referral research mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. A completed project's Champion has agreed to
+  make a referral introduction. Your job is to research the referral
+  target so the team walks into that first conversation knowing more
+  about this person or organization than most people who've worked
+  with them.
+
+  A warm introduction from a Champion carries more weight than anything
+  C-HAWQ can say on its own. The intro email must feel genuinely
+  personal — it references the Champion's own experience and sets
+  up C-HAWQ with credibility, not sales language.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM aggressively.
+  - Search for the referral contact by name + municipality or
+    organization. Pull: their role, tenure, public statements on
+    environmental or water quality issues, any project proposals or
+    CIP items, commission discussions about coastal challenges.
+  - Search for the municipality or organization's recent coastal,
+    water quality, or habitat project proposals — CIP documents,
+    commission agendas, news coverage.
+  - If the referral is an organization (not an individual), research
+    the organization's mission, recent projects, and leadership.
+  - Prefer official municipal sources and local news over national
+    coverage.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S10-2".
+  - contact_overview: 2-3 paragraphs on who this contact is, their
+    role, and their known relationship to coastal/water quality
+    challenges. If it's an organization, describe its mission, scale,
+    and relevant work. Grounded in what you found.
+  - recent_projects_or_proposals: specific public projects or proposals
+    the contact's municipality or organization has discussed in the
+    last 2 years. Each as a Claim with confidence and sources.
+  - warm_intro_email: to be sent by the Champion. References their
+    shared experience with C-HAWQ. Sets up the introduction credibly
+    without overselling. Subject line and body. Warm, personal, brief.
+  - best_chawq_talking_point: one specific hook — the single most
+    compelling thing C-HAWQ can say to this particular audience based
+    on what was found. Grounded in their specific challenges, not
+    generic C-HAWQ positioning.
+
+user: |
+  Research this Step 10 referral:
+
+  - Referring Champion: {{ champion_name }}, {{ champion_municipality }}
+  {%- if completed_project_name %}
+  - Completed project: {{ completed_project_name }}
+  {%- endif %}
+  {%- if completed_project_outcome %}
+  - Project outcome: {{ completed_project_outcome }}
+  {%- endif %}
+
+  Referral target: {{ referral_name }}
+  {%- if referral_title %}
+  - Title: {{ referral_title }}
+  {%- endif %}
+  {%- if referral_municipality %}
+  - Municipality/organization: {{ referral_municipality }}
+  {%- endif %}
+  {%- if referral_known_info %}
+  - What we already know: {{ referral_known_info }}
+  {%- endif %}
+
+  Produce:
+
+  1. Contact overview — 2-3 paragraphs on who this person or
+     organization is, their role, and their known relationship to
+     coastal or water quality challenges in their community.
+     Grounded in what you find.
+
+  2. Recent projects or proposals — specific coastal, water quality,
+     or habitat projects the contact's municipality or organization
+     has discussed in the last 2 years. Each with a confidence score
+     and source citation.
+
+  3. Warm intro email — to be sent by {{ champion_name }}. References
+     their shared C-HAWQ experience. Sets up the introduction
+     credibly without overselling C-HAWQ. Subject line and body.
+     Warm, personal, under 200 words.
+
+  4. Best C-HAWQ talking point — the single most compelling hook for
+     this specific audience based on what you found. Not generic
+     positioning — specific to their challenges.
+
+  Return as a ResearchBrief with findings.research_type = "S10-2".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 10
+    chunk_types: [criteria, checklist]
+    limit: 3
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+evals:
+  golden_cases_file: evals/research_agent/S10-2/golden.jsonl
+  min_pass_rate: 0.80

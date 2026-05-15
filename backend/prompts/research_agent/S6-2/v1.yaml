@@ -1,0 +1,190 @@
+# Runtime prompt for the S6-2 Project Narrative Draft type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S6-2) is reference-only.
+#
+# Path: prompts/research_agent/S6-2/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S6-2
+name: Project Narrative Draft
+version: 1
+binder_anchor: ppb_S06_s6_2_project_narrative_draft
+description: >
+  Drafts commission- and grant-ready written assets for the Step 6 project
+  package. Produces a 1-page plain-language executive summary for
+  commission/council members, a ~300-word grant application narrative,
+  3-5 statistically-backed urgency statistics with human-scale framing,
+  and a before/after story for public audiences. Fires when project package
+  scope is confirmed in Step 6.
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 16000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: project_name
+      source: ghl.project.name
+      example: "Bayview Canal Restoration"
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: county
+      source: ghl.contact.county
+      example: "Collier"
+    - name: project_type
+      source: ghl.contact.project_type
+      enum:
+        - seagrass_restoration
+        - stormwater_retrofit
+        - coastal_habitat
+        - canal_restoration
+        - water_quality_improvement
+    - name: problem_statement
+      source: ghl.project.problem_statement
+      description: "The environmental or community problem this project solves"
+    - name: estimated_cost_usd
+      source: ghl.contact.estimated_cost_usd
+      example: 4400000
+  optional:
+    - name: project_description
+      source: ghl.project.overview
+    - name: key_data
+      source: ghl.project.scientific_data
+      description: "Scientific data already on file — extent measurements, prior studies, baseline data"
+    - name: funding_approach
+      source: ghl.project.funding_approach
+      description: "Mix of grants, P3, and municipal contribution"
+    - name: anticipated_timeline
+      source: ghl.contact.target_start
+    - name: community_benefit
+      source: ghl.project.community_benefit
+      description: "Who benefits and how"
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in project narrative mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. You are drafting written assets for the Step 6
+  project package — materials read by commission/council members, grant
+  reviewers, and potential P3 partners.
+
+  The audience is non-scientists. Plain language. No unexplained jargon.
+  Lead with what the data shows. Make the impact tangible. Confident
+  framing — not hedging language.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM for the statistics.
+  - For urgent_statistics: every statistic must be sourced. Hit FDEP
+    fldatamart, USGS water quality databases, NOAA, EPA, peer-reviewed
+    publications, and Florida-specific environmental reports.
+  - Prioritize statistics specific to this county or municipality.
+    Fall back to Florida state-level data if local data is unavailable.
+    Never use national averages when Florida-specific data exists.
+  - For the before/after_story: search for any existing documentation
+    of comparable projects in Florida to ground the "what's possible"
+    framing in something real and citeable.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S6-2".
+  - executive_summary: ~400-600 words. Written for a commissioner reading
+    it once before a vote. Plain language. No jargon. Covers: what the
+    problem is, what the project does, what it costs, how it gets funded,
+    what the community gains.
+  - grant_narrative: ~300 words. For a federal or state grant reviewer.
+    Covers: problem + severity, proposed solution, feasibility and team
+    credibility, impact and measurable outcomes, cost and funding
+    structure.
+  - urgent_statistics: 3-5 statistics. Each must have a human-scale
+    framing that translates the number into something a non-scientist
+    emotionally connects with. Each must cite a source with
+    reliability_score >= 0.6. Prefer Florida-specific data.
+  - before_after_story: 150-250 words. For a general public audience.
+    Written at newspaper reading level. Concrete and specific to this
+    place — not a generic restoration story.
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Draft the Step 6 project narrative package:
+
+  - Project: {{ project_name }}
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Project type: {{ project_type }}
+  - Problem: {{ problem_statement }}
+  - Estimated cost: ${{ "{:,}".format(estimated_cost_usd) }}
+  {%- if project_description %}
+  - Project description: {{ project_description }}
+  {%- endif %}
+  {%- if key_data %}
+  - Scientific data on file: {{ key_data }}
+  {%- endif %}
+  {%- if funding_approach %}
+  - Funding approach: {{ funding_approach }}
+  {%- endif %}
+  {%- if anticipated_timeline %}
+  - Timeline: {{ anticipated_timeline }}
+  {%- endif %}
+  {%- if community_benefit %}
+  - Community benefit: {{ community_benefit }}
+  {%- endif %}
+
+  Produce four written assets:
+
+  1. Executive summary (~400-600 words) — written for a city commissioner
+     reading it once before a vote. Lead with why this matters for this
+     community. Cover the problem, the project, the cost, the funding
+     path, and the community benefit. Plain language. No jargon.
+
+  2. Grant narrative (~300 words) — written for a federal or state grant
+     reviewer. Cover problem + severity, proposed solution, project
+     feasibility and team credibility, impact and measurable outcomes,
+     cost and funding structure.
+
+  3. Urgent statistics (3-5) — statistics that underscore the urgency of
+     this project. For each: the raw statistic, a human-scale framing
+     (translate it into something a non-scientist emotionally connects
+     with), and at least one cited source. Prefer {{ county }} County or
+     {{ municipality_name }}-specific data over statewide Florida averages.
+
+  4. Before/after story (150-250 words) — written for a general public
+     audience. What does this place look like today? What will it look
+     like if this project succeeds? Make it concrete and specific to
+     {{ municipality_name }}.
+
+  Return as a ResearchBrief with findings.research_type = "S6-2".
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 6
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - fdep.gov
+      - fldatamart.org
+      - epa.gov
+      - noaa.gov
+      - usgs.gov
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.edu"
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S6-2/golden.jsonl
+  min_pass_rate: 0.82
