@@ -6,3 +6,4 @@ playwright
 requests
 assemblyai
 deepgram-sdk
+anthropic
