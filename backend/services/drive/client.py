@@ -167,9 +167,31 @@ def upload_text_file(
     Caller is responsible for ensuring the runtime SA has Editor access on
     the target folder. Without it this will fail with insufficientPermissions.
     """
+    return upload_bytes_file(
+        folder_id=folder_id,
+        filename=filename,
+        content=content.encode("utf-8"),
+        mime_type=mime_type,
+    )
+
+
+def upload_bytes_file(
+    folder_id: str,
+    filename: str,
+    content: bytes,
+    mime_type: str,
+) -> dict[str, str]:
+    """
+    Upload raw bytes as a new file inside `folder_id`. Used for binary
+    artifacts the agents produce — PDF letters, future pptx decks, etc.
+    Returns the same shape as upload_text_file: id, name, webViewLink.
+
+    text/markdown uploads should keep using upload_text_file (this
+    function is the lower-level path it now delegates to).
+    """
     service = _get_drive_service()
     media = MediaIoBaseUpload(
-        io.BytesIO(content.encode("utf-8")),
+        io.BytesIO(content),
         mimetype=mime_type,
         resumable=False,
     )

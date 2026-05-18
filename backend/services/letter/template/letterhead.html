@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ subject_line | e }}</title>
+<style>
+  /* C-HAWQ brand. Main Blue #1f396d, Secondary Green #3f886c.
+     Headings: Futura PT. Body: Source Sans 3. Page-size letter,
+     1in margins, single-page target.
+
+     Font fallbacks chosen so the letter still reads close to brand
+     when WeasyPrint can't find Futura PT / Source Sans 3 on the host
+     (Cloud Run base image is unlikely to ship them). Replace with
+     @font-face URLs to a Drive-hosted woff2 once the asset pipeline
+     is in place. */
+
+  @page {
+    size: letter;
+    margin: 0.85in 1in 0.85in 1in;
+  }
+
+  body {
+    font-family: "Source Sans 3", "Source Sans Pro", "Helvetica Neue", Arial, sans-serif;
+    color: #222;
+    font-size: 11.5pt;
+    line-height: 1.45;
+  }
+
+  header.letterhead {
+    border-bottom: 2pt solid #1f396d;
+    padding-bottom: 14pt;
+    margin-bottom: 24pt;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .brand {
+    font-family: "Futura PT", "Futura", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    color: #1f396d;
+    font-size: 20pt;
+    letter-spacing: 0.5pt;
+  }
+  .brand-tag {
+    font-family: "Futura PT", "Futura", "Helvetica Neue", Arial, sans-serif;
+    color: #3f886c;
+    font-size: 10pt;
+    letter-spacing: 0.3pt;
+    margin-top: 2pt;
+  }
+
+  .sender-block {
+    text-align: right;
+    color: #555;
+    font-size: 9.5pt;
+    line-height: 1.35;
+  }
+  .sender-block .sender-name {
+    color: #1f396d;
+    font-weight: 600;
+    font-size: 10.5pt;
+  }
+
+  .date-line {
+    color: #555;
+    font-size: 10pt;
+    margin-bottom: 22pt;
+  }
+
+  .recipient-block {
+    margin-bottom: 22pt;
+    line-height: 1.35;
+  }
+  .recipient-block .recipient-name {
+    font-weight: 600;
+    color: #1f396d;
+  }
+
+  .subject-line {
+    font-family: "Futura PT", "Futura", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    color: #1f396d;
+    font-size: 12pt;
+    margin-bottom: 18pt;
+  }
+
+  p {
+    margin: 0 0 12pt 0;
+    text-align: left;
+  }
+
+  /* Ideas paragraphs get a subtle left-rule to imply enumeration
+     without being a bullet list (matches the brand voice — declarative,
+     not promotional). */
+  .ideas p {
+    border-left: 2pt solid #3f886c;
+    padding-left: 10pt;
+    margin-bottom: 14pt;
+  }
+
+  .signature-block {
+    margin-top: 26pt;
+  }
+  .signature-block .signed {
+    /* Stand-in for a future signature image. V1: typed name on its own
+       line above the printed name + title so the visual cadence still
+       reads as a closed letter. */
+    font-family: "Brush Script MT", "Lucida Handwriting", cursive;
+    color: #1f396d;
+    font-size: 18pt;
+    margin: 0 0 6pt 0;
+  }
+  .signature-block .printed-name {
+    font-weight: 600;
+    color: #222;
+  }
+  .signature-block .sender-title {
+    color: #555;
+    font-size: 10pt;
+    line-height: 1.35;
+  }
+  .signature-block .sender-email {
+    color: #1f396d;
+    font-size: 9.5pt;
+    text-decoration: none;
+  }
+
+  footer.brand-footer {
+    position: running(footer);
+    border-top: 0.75pt solid #d0d4da;
+    padding-top: 8pt;
+    margin-top: 24pt;
+    color: #888;
+    font-size: 8.5pt;
+    text-align: center;
+  }
+  @page { @bottom-center { content: element(footer); } }
+</style>
+</head>
+<body>
+
+<header class="letterhead">
+  <div>
+    <div class="brand">C-HAWQ</div>
+    <div class="brand-tag">Coastal Habitat &amp; Water Quality Initiative</div>
+  </div>
+  <div class="sender-block">
+    <div class="sender-name">{{ sender_name | e }}</div>
+    {% if sender_title %}<div>{{ sender_title | e }}</div>{% endif %}
+    {% if sender_email %}<div><a class="sender-email" href="mailto:{{ sender_email | e }}">{{ sender_email | e }}</a></div>{% endif %}
+  </div>
+</header>
+
+<div class="date-line">{{ generated_date | e }}</div>
+
+<div class="recipient-block">
+  <div class="recipient-name">{{ recipient_name | e }}</div>
+  {% if recipient_title %}<div>{{ recipient_title | e }}</div>{% endif %}
+  {% if recipient_organization %}<div>{{ recipient_organization | e }}</div>{% endif %}
+</div>
+
+<div class="subject-line">{{ subject_line | e }}</div>
+
+<p>{{ opening_paragraph | e }}</p>
+
+{% for paragraph in observation_paragraphs %}
+<p>{{ paragraph | e }}</p>
+{% endfor %}
+
+<div class="ideas">
+{% for paragraph in ideas_paragraphs %}
+<p>{{ paragraph | e }}</p>
+{% endfor %}
+</div>
+
+<p>{{ offer_paragraph | e }}</p>
+
+<p>{{ closing_paragraph | e }}</p>
+
+<div class="signature-block">
+  <p class="signed">{{ signature_name | e }}</p>
+  <div class="printed-name">{{ sender_name | e }}</div>
+  {% if sender_title %}<div class="sender-title">{{ sender_title | e }}</div>{% endif %}
+  {% if sender_email %}<div><a class="sender-email" href="mailto:{{ sender_email | e }}">{{ sender_email | e }}</a></div>{% endif %}
+</div>
+
+<footer class="brand-footer">
+  C-HAWQ &middot; Coastal Habitat &amp; Water Quality Initiative &middot; Florida 501(c)(3)
+</footer>
+
+</body>
+</html>

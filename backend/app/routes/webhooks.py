@@ -29,6 +29,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 
 from core.settings import get_settings
 from services.email_drafter_runner import run_email_drafter_for_ghl_payload
+from services.letter_runner import run_letter_for_ghl_payload
 from services.research_agent.adapter import run_research_agent_for_ghl_payload
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ router = APIRouter()
 DISPATCH_HANDLERS: dict[str, Callable[[dict[str, Any]], None]] = {
     "email_drafter": run_email_drafter_for_ghl_payload,
     "deep_research": run_research_agent_for_ghl_payload,
+    "letter": run_letter_for_ghl_payload,
 }
 
 

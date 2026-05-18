@@ -16,6 +16,9 @@ anthropic>=0.34.0
 # --- YAML prompt registry (loaded by agents/base.py) ---
 pyyaml>=6.0.0
 
+# --- Templating ---
+jinja2>=3.1.0
+
 # --- Google Cloud ---
 google-cloud-firestore>=2.16.0
 google-cloud-storage>=2.16.0
@@ -29,6 +32,7 @@ pypdf>=4.2.0  # native PDF text extraction (Iflytek transcripts, email attachmen
 
 # --- Document renderers (agent outputs) ---
 python-pptx>=1.0.0  # render Presentation Outliner JSON spec into branded decks
+weasyprint>=62.0  # render Letter Agent HTML → PDF (needs system deps: pango, cairo, libffi, harfbuzz, gdk-pixbuf, glib)
 
 # --- Webhook signature verification (Ed25519 for GHL, HMAC in stdlib) ---
 # doesnt install locally 
