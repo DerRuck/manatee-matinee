@@ -51,6 +51,36 @@ PLAIN_TEXT_MIMES = {
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+PDF_MIME = "application/pdf"
+
+# Mime prefixes / exact types we never try to extract text from. Audio
+# and images need transcription / OCR (out of V1 scope); JSON dumps from
+# Plaud are noisy raw data and shouldn't be embed targets. Caller can
+# check is_text_extractable_mime() to decide before download.
+SKIP_MIME_PREFIXES: tuple[str, ...] = (
+    "audio/",
+    "video/",
+    "image/",
+)
+SKIP_MIME_EXACT: frozenset[str] = frozenset({
+    "application/json",
+})
+
+
+def is_text_extractable_mime(mime_type: str | None) -> bool:
+    """True if download_file_as_text() will return text for this mime type."""
+    if not mime_type:
+        return False
+    if mime_type.startswith(SKIP_MIME_PREFIXES):
+        return False
+    if mime_type in SKIP_MIME_EXACT:
+        return False
+    return mime_type in PLAIN_TEXT_MIMES or mime_type in {
+        GOOGLE_DOC_MIME,
+        DOCX_MIME,
+        PDF_MIME,
+    }
+
 
 _drive_service: Any | None = None
 
@@ -74,6 +104,51 @@ def _get_drive_service():
 
     _drive_service = build("drive", "v3", credentials=creds, cache_discovery=False)
     return _drive_service
+
+
+def find_or_create_folder(name: str, parent_folder_id: str) -> str:
+    """
+    Return the Drive folder ID for `name` under `parent_folder_id`.
+    Creates the folder if it doesn't exist; returns the existing ID if
+    one matches by exact name.
+
+    Used by agent runners to materialize the per-lead Drive layout
+    (`/Leads/<municipality>/<contact>/<typed_subfolder>/...`) the first
+    time an agent writes for a new lead. Idempotent — re-runs are cheap.
+
+    Raises HttpError on Drive API failure (caller decides whether to
+    retry or fall back to writing flat).
+    """
+    service = _get_drive_service()
+    # Look for an existing folder of that name under the parent.
+    children = list_folder_files(parent_folder_id)
+    for child in children:
+        if (
+            child.get("mimeType") == FOLDER_MIME
+            and child.get("name") == name
+        ):
+            return child["id"]
+
+    # Not found — create it.
+    body = {
+        "name": name,
+        "mimeType": FOLDER_MIME,
+        "parents": [parent_folder_id],
+    }
+    response = (
+        service.files()
+        .create(body=body, fields="id, name", supportsAllDrives=True)
+        .execute()
+    )
+    logger.info(
+        "drive folder created",
+        extra={
+            "folder_id": response["id"],
+            "folder_name": name,
+            "parent_folder_id": parent_folder_id,
+        },
+    )
+    return response["id"]
 
 
 def upload_text_file(
@@ -137,7 +212,7 @@ def list_folder_files(
                 q=f"'{folder_id}' in parents and trashed = false",
                 fields=(
                     "nextPageToken, "
-                    "files(id, name, mimeType, modifiedTime, webViewLink, parents)"
+                    "files(id, name, mimeType, modifiedTime, webViewLink, parents, size)"
                 ),
                 pageSize=page_size,
                 pageToken=page_token,
@@ -155,16 +230,87 @@ def list_folder_files(
 
 
 def get_file_metadata(file_id: str) -> dict[str, Any]:
-    """Fetch a single file's metadata (id, name, mimeType, parents)."""
+    """
+    Fetch a single file's metadata.
+
+    Returns the same field shape that `list_folder_files()` and
+    `walk_folder()` yield (id, name, mimeType, modifiedTime, webViewLink,
+    parents) plus `size`, so the result drops cleanly into any code path
+    that already understands walker output. `size` is needed by the
+    iflytek resolver to skip 0-byte sidecars.
+    """
     service = _get_drive_service()
     return (
         service.files()
         .get(
             fileId=file_id,
-            fields="id, name, mimeType, parents",
+            fields="id, name, mimeType, modifiedTime, webViewLink, parents, size",
             supportsAllDrives=True,
         )
         .execute()
+    )
+
+
+def derive_path_segments(
+    file_id: str,
+    stop_at_folder_id: str,
+    max_depth: int = 16,
+) -> list[str]:
+    """
+    Walk parents back from `file_id` up to (but not including)
+    `stop_at_folder_id`, returning folder names in root → leaf order.
+
+    Mirrors what `walk_folder()` yields as path_segments for a file at
+    the same location: the file's immediate parent name is last in the
+    list; `stop_at_folder_id`'s name is NOT included. Files directly
+    inside `stop_at_folder_id` get an empty list back.
+
+    Used by the single-file ingest entry point so per-source resolvers
+    see the same lineage shape they get during a recursive folder walk.
+
+    Raises ValueError if the file isn't actually a descendant of
+    `stop_at_folder_id` within `max_depth` levels — keeps mis-classified
+    files from sneaking into the wrong source taxonomy silently.
+    """
+    service = _get_drive_service()
+
+    # Start from the file's parent, not the file itself.
+    file_meta = (
+        service.files()
+        .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+        .execute()
+    )
+    parents = file_meta.get("parents") or []
+    if not parents:
+        raise ValueError(
+            f"file {file_id} has no parents — can't derive path segments"
+        )
+
+    segments: list[str] = []
+    current = parents[0]
+
+    for _ in range(max_depth):
+        if current == stop_at_folder_id:
+            return list(reversed(segments))
+
+        folder = (
+            service.files()
+            .get(
+                fileId=current,
+                fields="id, name, parents",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        segments.append(folder["name"])
+        next_parents = folder.get("parents") or []
+        if not next_parents:
+            break  # hit My Drive root without seeing stop_at_folder_id
+        current = next_parents[0]
+
+    raise ValueError(
+        f"file {file_id} is not a descendant of folder "
+        f"{stop_at_folder_id} within {max_depth} levels"
     )
 
 
@@ -210,15 +356,35 @@ def walk_folder(
             yield child, list(path)
 
 
-def download_file_as_text(file_id: str, mime_type: str) -> str | None:
+def download_file_as_text(
+    file_id: str,
+    mime_type: str,
+    file_name: str | None = None,
+) -> str | None:
     """
     Download a Drive file's content as plain UTF-8 text.
 
       - Google Doc -> export as text/plain
       - text/plain or text/markdown -> raw bytes -> utf-8
       - .docx -> raw bytes -> python-docx -> paragraphs + table cells joined
+      - .pdf -> raw bytes -> pypdf -> page text concatenated (native text only)
+      - audio/video/image/json -> None (skip with log)
       - Anything else -> None (caller logs and skips)
+
+    `file_name` is used to disambiguate `application/octet-stream` files,
+    which Drive serves for both `.md` text and `.opus` audio. When given,
+    octet-stream files are only treated as text if the extension says so.
+    Without a filename we fall back to the old behavior (treat as text).
     """
+    if mime_type and (
+        mime_type.startswith(SKIP_MIME_PREFIXES) or mime_type in SKIP_MIME_EXACT
+    ):
+        logger.info(
+            "drive download skip — non-text mime type",
+            extra={"file_id": file_id, "mime_type": mime_type, "file_name": file_name},
+        )
+        return None
+
     service = _get_drive_service()
 
     if mime_type == GOOGLE_DOC_MIME:
@@ -230,14 +396,25 @@ def download_file_as_text(file_id: str, mime_type: str) -> str | None:
         return result.decode("utf-8") if isinstance(result, bytes) else result
 
     if mime_type in PLAIN_TEXT_MIMES:
+        if mime_type == "application/octet-stream" and file_name:
+            ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+            if ext not in {"md", "markdown", "txt"}:
+                logger.info(
+                    "drive download skip — octet-stream with non-text extension",
+                    extra={"file_id": file_id, "file_name": file_name, "ext": ext},
+                )
+                return None
         return _download_bytes(service, file_id).decode("utf-8", errors="replace")
 
     if mime_type == DOCX_MIME:
         return _docx_bytes_to_text(_download_bytes(service, file_id))
 
+    if mime_type == PDF_MIME:
+        return _pdf_bytes_to_text(_download_bytes(service, file_id))
+
     logger.info(
         "drive download skip — unsupported mime type",
-        extra={"file_id": file_id, "mime_type": mime_type},
+        extra={"file_id": file_id, "mime_type": mime_type, "file_name": file_name},
     )
     return None
 
@@ -251,6 +428,52 @@ def _download_bytes(service, file_id: str) -> bytes:
     while not done:
         _, done = downloader.next_chunk()
     return buf.getvalue()
+
+
+def _pdf_bytes_to_text(data: bytes) -> str | None:
+    """
+    Extract text from a PDF's raw bytes using pypdf.
+
+    V1 handles native (text-bearing) PDFs only — exported docs from Word,
+    Drive, Iflytek, Gmail-as-PDF, etc. Scanned/image-only PDFs come back
+    near-empty; we return None in that case so the caller can skip the
+    file rather than embed a corpus of whitespace.
+
+    Encrypted PDFs are also returned as None — V1 doesn't unlock them.
+    """
+    # Lazy import: pypdf is only needed when we hit a .pdf file.
+    from pypdf import PdfReader  # type: ignore
+    from pypdf.errors import PdfReadError  # type: ignore
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+    except PdfReadError as exc:
+        logger.warning("pdf parse error — skipping", extra={"error": str(exc)})
+        return None
+
+    if reader.is_encrypted:
+        logger.info("pdf is encrypted — skipping")
+        return None
+
+    parts: list[str] = []
+    for page in reader.pages:
+        try:
+            text = page.extract_text() or ""
+        except Exception as exc:
+            # pypdf occasionally throws on malformed pages; skip the page
+            # rather than failing the whole file.
+            logger.warning("pdf page extract error — skipping page", extra={"error": str(exc)})
+            continue
+        text = text.strip()
+        if text:
+            parts.append(text)
+
+    if not parts:
+        # Native PDF text extraction returned nothing — likely scanned.
+        # OCR is a separate decision (out of V1 scope).
+        return None
+
+    return "\n\n".join(parts)
 
 
 def _docx_bytes_to_text(data: bytes) -> str:
