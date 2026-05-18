@@ -16,12 +16,6 @@ from pydantic import BaseModel, Field
 
 # enum Adding values later is free; renaming/splitting
 # existing ones forces reclassify + in-place chunk update.
-#
-# "other" is the default for files we ingest but can't classify
-# confidently (e.g., PDFs attached to an email, lead docs whose name
-# doesn't signal type). Filtering by document_type stays honest because
-# "research_report" really means research report — uncategorized goes
-# to "other" and can be reclassified in place when patterns clarify.
 DocumentType = Literal[
     "email",
     "presentation",
@@ -31,7 +25,6 @@ DocumentType = Literal[
     "project_plan",
     "letter",
     "image",
-    "other",
 ]
 
 IngestionStatus = Literal["pending", "processing", "completed", "failed"]
@@ -82,12 +75,6 @@ class Document(BaseModel):
     municipality: list[str] = Field(default_factory=list)
     project_name: list[str] = Field(default_factory=list)
 
-    # Origin tag for the source folder. V1 values:
-    #   plaud, leads, industry_context, email_data, iflytek
-    # Used by retrieval to filter dev/prod data, by the ingester to pick
-    # a per-source resolver, and by ops to count corpus size by source.
-    data_source: Optional[str] = None
-
 
 class Chunk(BaseModel):
     """
@@ -119,7 +106,6 @@ class Chunk(BaseModel):
     contact_id: list[str] = Field(default_factory=list)
     municipality: list[str] = Field(default_factory=list)
     project_name: list[str] = Field(default_factory=list)
-    data_source: Optional[str] = None
 
     # Optional positional info. V1 leaves these empty; populate later when
     # the parser is smart enough to track headings or page numbers.

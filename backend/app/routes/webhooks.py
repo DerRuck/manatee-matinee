@@ -5,84 +5,21 @@ Two producers send us webhooks:
   1. Google Drive push notifications (file added/changed in watched folders).
   2. GoHighLevel workflow actions (stage change, form submit, inbound SMS/email).
 
-Both endpoints return 202 fast and hand work off to a background task,
+Both endpoints return 200 fast and hand work off to a background task,
 per the V1 "asynchronous tasks only" guardrail.
 
-GHL auth: shared-secret header check (D2, landed 5/8). Workflow webhooks
-send no signature, so a static `X-CHawq-Webhook-Secret` header matched
-against `settings.ghl_webhook_secret` is the practical Sprint 2.0 auth.
-If `ghl_webhook_secret` is unset, the endpoint accepts without checking
-and logs a warning — preserves local-dev ergonomics. Tighten in prod by
-populating the secret via Secret Manager.
-
-GHL agent dispatch (D3, landed 5/8): the payload's `agent` field selects
-which runner picks up the work. The DISPATCH_HANDLERS registry maps
-agent name → background-task function. Extend by adding one entry; the
-runner must take a single `payload: dict` argument and never raise.
+All signature verification is TODO — wired in during Sprint 2 GHL integration.
 """
 import json
 import logging
-import secrets
-from typing import Any, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
-from core.settings import get_settings
-from services.email_drafter_runner import run_email_drafter_for_ghl_payload
-from services.research_agent.adapter import run_research_agent_for_ghl_payload
+from services.hello_world_runner import run_hello_world_for_ghl_contact
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# Maps `payload["agent"]` to the background-task entry point. Each
-# handler MUST accept a single `payload: dict[str, Any]` argument and
-# MUST NOT raise — the webhook has already returned 202 by the time the
-# handler runs, so unhandled exceptions vanish into the BackgroundTask
-# worker. Per-agent runners wrap their bodies in try/except for this.
-#
-# Add a new agent by registering its `*_for_ghl_payload` function here.
-# Luis's deep_research runner registers when that side lands.
-DISPATCH_HANDLERS: dict[str, Callable[[dict[str, Any]], None]] = {
-    "email_drafter": run_email_drafter_for_ghl_payload,
-    "deep_research": run_research_agent_for_ghl_payload,
-}
-
-
-GHL_WEBHOOK_SECRET_HEADER = "X-CHawq-Webhook-Secret"
-
-
-def _verify_ghl_shared_secret(provided: str | None) -> None:
-    """
-    Compare the provided X-CHawq-Webhook-Secret header against the
-    configured `ghl_webhook_secret`. Raises HTTPException(401) on
-    mismatch. Logs + accepts when the secret is unset (local dev).
-
-    Constant-time comparison via secrets.compare_digest blocks timing
-    attacks even though the secret is short.
-    """
-    expected = get_settings().ghl_webhook_secret
-    if not expected:
-        logger.warning(
-            "ghl_webhook_secret unset — accepting webhook unauthenticated. "
-            "Set GHL_WEBHOOK_SECRET in prod."
-        )
-        return
-
-    if not provided:
-        logger.info("ghl webhook missing %s header — rejecting", GHL_WEBHOOK_SECRET_HEADER)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="missing webhook secret header",
-        )
-
-    if not secrets.compare_digest(provided, expected):
-        logger.info("ghl webhook secret mismatch — rejecting")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid webhook secret",
-        )
 
 
 # -------------------- Google Drive --------------------
@@ -148,33 +85,29 @@ async def ghl_webhook(
     background_tasks: BackgroundTasks,
     x_wh_signature: str | None = Header(default=None),
     x_ghl_signature: str | None = Header(default=None),
-    x_chawq_webhook_secret: str | None = Header(default=None),
 ):
     """
     Receives outbound webhooks from GHL workflows.
 
-    Auth: workflow webhooks send no signature, so we require a static
-    `X-CHawq-Webhook-Secret` header that matches settings.ghl_webhook_secret.
-    Configure the header on the GHL Workflow's webhook step. API-subscribed
-    webhooks (HMAC-SHA256 today, Ed25519 after 2026-07-01) carry signatures
-    via x_wh_signature / x_ghl_signature — that path is wired separately
-    when API webhooks come into scope.
-
-    Dispatch (D3 task): the workflow payload carries `agent` and either
-    `contact_id` or `id`; the handler resolves the runner and enqueues
-    it as a background task so the webhook returns 202 immediately.
+    GHL is migrating from HMAC-SHA256 (X-WH-Signature) to Ed25519 (X-GHL-Signature)
+    on 2026-07-01. We read both headers now and verify whichever is present.
     """
-    _verify_ghl_shared_secret(x_chawq_webhook_secret)
-
     body = await request.body()
 
-    # TODO(API-subscribed): verify_ghl_signature(body, x_ghl_signature
-    # or x_wh_signature) — only relevant once API-subscribed webhooks
-    # are in use.
+    # TODO: verify_ghl_signature(body, x_ghl_signature or x_wh_signature)
+    # For now, log and return 202 so we can wire the spike without auth.
+    logger.info(
+        "ghl webhook received",
+        extra={
+            "body_bytes": len(body),
+            "has_ghl_sig": bool(x_ghl_signature),
+            "has_legacy_sig": bool(x_wh_signature),
+        },
+    )
 
     # Parse the JSON payload defensively. GHL Workflow webhooks send JSON,
-    # but a malformed body shouldn't 500 the endpoint — log and 202 so the
-    # workflow doesn't surface a failure to the operator.
+    # but we don't want a malformed body to 500 the endpoint — log and accept
+    # so the workflow doesn't see a failure.
     try:
         payload = json.loads(body) if body else {}
         if not isinstance(payload, dict):
@@ -187,50 +120,14 @@ async def ghl_webhook(
         logger.warning("ghl webhook body was not valid JSON — ignoring")
         payload = {}
 
-    agent_name = payload.get("agent") if isinstance(payload, dict) else None
-    contact_id = (
-        payload.get("contact_id") or payload.get("id")
-        if isinstance(payload, dict)
-        else None
-    )
-
-    logger.info(
-        "ghl webhook received",
-        extra={
-            "body_bytes": len(body),
-            "agent": agent_name,
-            "contact_id": contact_id,
-            "has_ghl_sig": bool(x_ghl_signature),
-            "has_legacy_sig": bool(x_wh_signature),
-        },
-    )
-
-    # Dispatch by `agent` field. Unknown agents are accepted (so the GHL
-    # workflow doesn't see a failure) but logged so misconfigurations
-    # show up in Cloud Logging instead of failing silently.
-    if not agent_name:
-        logger.warning(
-            "ghl webhook missing `agent` field — no dispatch",
-            extra={"contact_id": contact_id},
-        )
-        return {"status": "accepted", "dispatched": False, "reason": "missing_agent"}
-
-    handler = DISPATCH_HANDLERS.get(agent_name)
-    if handler is None:
+    # Sprint demo: every GHL webhook fires the Hello World agent.
+    # Drive output + Firestore log layer into
+    # run_hello_world_for_ghl_contact, not this handler.
+    if payload:
+        background_tasks.add_task(run_hello_world_for_ghl_contact, payload)
         logger.info(
-            "ghl webhook agent not wired — accepted but not dispatched",
-            extra={"agent": agent_name, "contact_id": contact_id},
+            "ghl webhook -> hello_world runner enqueued",
+            extra={"contact_id": payload.get("contact_id") or payload.get("id")},
         )
-        return {
-            "status": "accepted",
-            "dispatched": False,
-            "reason": "agent_not_wired",
-            "agent": agent_name,
-        }
 
-    background_tasks.add_task(handler, payload)
-    logger.info(
-        "ghl webhook dispatched",
-        extra={"agent": agent_name, "contact_id": contact_id},
-    )
-    return {"status": "accepted", "dispatched": True, "agent": agent_name}
+    return {"status": "accepted"}
