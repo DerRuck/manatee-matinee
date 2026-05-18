@@ -290,7 +290,8 @@ def scrape_and_upload(url, drive_service):
             base_name = f"{date_prefix}_{clean_title}"
 
             # --- Audio ---
-            audio_src = page.get_attribute("audio", "src") or page.get_attribute("video", "src")
+            audio_elem = page.query_selector("audio") or page.query_selector("video")
+            audio_src = audio_elem.get_attribute("src") if audio_elem else None
             if audio_src:
                 r = requests.get(audio_src)
                 save_to_drive(r.content, f"{base_name}.opus", "audio/ogg", drive_service)
