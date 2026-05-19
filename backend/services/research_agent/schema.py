@@ -48,7 +48,23 @@ class Source(BaseModel):
     title: str | None = None
     reliability_score: float = Field(
         ge=0.0, le=1.0,
-        description="0.0-1.0. Authoritative >=0.8, reject <0.4.",
+        description=(
+            "0.0-1.0 source reliability. Use these anchors:\n"
+            "  0.90-0.95: official statute, regulation, court ruling, or the "
+            "jurisdiction's OWN clerk/agency page documenting its own rules. "
+            "A municipality's own .gov website IS authoritative for its own "
+            "rules — even small towns. Size of jurisdiction does not lower "
+            "the score.\n"
+            "  0.80-0.90: other .gov pages, .edu peer-reviewed publications, "
+            "primary agency datasets (FDEP, USGS, NOAA).\n"
+            "  0.60-0.80: established news (Tampa Bay Times, Miami Herald), "
+            "trade press (Florida Trend, Governing).\n"
+            "  0.40-0.60: opinion pieces, advocacy-org summaries, secondary "
+            "compilations, .org explainers that don't link to a primary source.\n"
+            "  <0.40: blogs, forums, social-media posts, AI-generated summaries "
+            "without a verifiable upstream source. Claims supported only by "
+            "sources at this level will be rejected — re-source or drop the claim."
+        ),
     )
     fetched_at: datetime | None = None
 

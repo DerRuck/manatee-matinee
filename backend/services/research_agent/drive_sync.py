@@ -1094,8 +1094,21 @@ def upload_brief(
     brief: ResearchBrief,
     folder_id: str = DEFAULT_FOLDER_ID,
 ) -> dict[str, dict]:
-    """Upload brief as JSON + Word doc to Drive. Returns file metadata per format."""
+    """Upload brief as JSON + Word doc to Drive. Returns file metadata per format.
+
+    Files land in {folder_id}/{contact folder}/Research Briefs/. Contact
+    and type subfolders are created on first use and reused on re-runs.
+    """
+    from services.drive.folders import ensure_subfolder, resolve_contact_folder_name
+
     service = _get_drive_service()
+
+    contact_folder_id = ensure_subfolder(
+        service, folder_id, resolve_contact_folder_name(brief),
+    )
+    target_folder_id = ensure_subfolder(
+        service, contact_folder_id, "Research Briefs",
+    )
 
     json_bytes = brief.model_dump_json(indent=2).encode("utf-8")
     docx_bytes = render_docx(brief)
@@ -1103,10 +1116,10 @@ def upload_brief(
     return {
         "json": _upload_or_replace(
             service, filename_for(brief, "json"),
-            json_bytes, "application/json", folder_id,
+            json_bytes, "application/json", target_folder_id,
         ),
         "docx": _upload_or_replace(
             service, filename_for(brief, "docx"),
-            docx_bytes, DOCX_MIME, folder_id,
+            docx_bytes, DOCX_MIME, target_folder_id,
         ),
     }

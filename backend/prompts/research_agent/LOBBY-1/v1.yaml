@@ -58,6 +58,12 @@ system: |
   - Every factual claim about registration mechanics must cite the specific
     clerk page, ordinance, or statute. Reliability < 0.85 on these claims
     means we shouldn't act on them; flag in notes.
+  - Source scoring: a jurisdiction's OWN clerk / commission / ethics-board
+    page documenting its OWN lobbyist rules scores 0.90-0.95 regardless of
+    municipality size. Florida statutes (leg.state.fl.us) and the Florida
+    Commission on Ethics score 0.90-0.95. Other .gov pages score 0.80-0.90.
+    Do not under-score a small town's official website — it IS authoritative
+    for its own rules. Refer to the full anchors in the schema description.
   - If county_covers_municipalities is null (genuinely unclear), explain why
     in notes.
 
