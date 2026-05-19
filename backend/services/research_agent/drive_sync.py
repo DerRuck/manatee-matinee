@@ -960,22 +960,26 @@ def render_docx(brief: ResearchBrief) -> bytes:
     """Render a ResearchBrief as a Word document and return the raw bytes."""
     from docx import Document
 
-    doc = Document()
-
-    # ---- Title ---------------------------------------------------------------
-    step_name = _TYPE_NAMES.get(brief.research_type_id, brief.research_type_id)
-    doc.add_heading(
-        f"{step_name} — {brief.municipality_name or 'Brief'}", 0
+    from services.branding.docx_styles import (
+        add_brand_header, add_meta_line, apply_brand_styles,
     )
 
-    # ---- Metadata ------------------------------------------------------------
-    meta = doc.add_paragraph()
-    meta.add_run("Generated: ").bold = True
-    meta.add_run(brief.generated_at.strftime("%B %d, %Y at %H:%M UTC"))
-    meta.add_run("     Confidence: ").bold = True
-    meta.add_run(f"{brief.overall_confidence:.2f}")
-    meta.add_run("     Run: ").bold = True
-    meta.add_run(brief.run_id[:8])
+    doc = Document()
+    apply_brand_styles(doc)
+
+    step_name = _TYPE_NAMES.get(brief.research_type_id, brief.research_type_id)
+    add_brand_header(
+        doc,
+        title=f"{step_name} — {brief.municipality_name or 'Brief'}",
+        subtitle=f"{brief.research_type_id} · prepared for C-HAWQ internal review",
+    )
+
+    add_meta_line(
+        doc,
+        generated=brief.generated_at.strftime("%B %d, %Y at %H:%M UTC"),
+        confidence=brief.overall_confidence,
+        run=brief.run_id[:8],
+    )
 
     # ---- Findings — type-specific or generic --------------------------------
     custom = _CUSTOM_RENDERERS.get(brief.research_type_id)

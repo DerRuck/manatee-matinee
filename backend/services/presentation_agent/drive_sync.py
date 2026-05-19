@@ -166,13 +166,27 @@ def render_docx(outline: PresentationOutline) -> bytes:
     import io
     from docx import Document
 
+    from services.branding.docx_styles import (
+        add_brand_header, add_meta_line, apply_brand_styles,
+    )
+
     doc = Document()
+    apply_brand_styles(doc)
     f = outline.findings
 
-    doc.add_heading(f.deck_title, level=0)
-    if f.deck_subtitle:
-        sub = doc.add_paragraph()
-        sub.add_run(f.deck_subtitle).italic = True
+    add_brand_header(
+        doc,
+        title=f.deck_title,
+        subtitle=f.deck_subtitle or f"{outline.outline_type_id} · presentation outline",
+    )
+
+    add_meta_line(
+        doc,
+        generated=outline.generated_at.strftime("%B %d, %Y at %H:%M UTC"),
+        confidence=outline.overall_confidence,
+        run=outline.run_id[:8],
+        slides=len(f.slides),
+    )
 
     doc.add_heading("Meeting context", level=1)
     _add_kv(doc, "Outline type", outline.outline_type_id)
@@ -180,7 +194,6 @@ def render_docx(outline: PresentationOutline) -> bytes:
     _add_kv(doc, "Objective", f.meeting_objective)
     _add_kv(doc, "Champion", f.champion_name)
     _add_kv(doc, "Municipality", outline.municipality_name)
-    _add_kv(doc, "Overall confidence", outline.overall_confidence)
 
     if outline.upstream_briefs:
         doc.add_heading("Upstream research briefs", level=1)
