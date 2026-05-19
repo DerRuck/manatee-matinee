@@ -114,7 +114,7 @@ def run_hello_world_for_ghl_contact(payload: dict[str, Any]) -> None:
             "started_at": started_at,
             "finished_at": finished_at,
             "duration_seconds": (finished_at - started_at).total_seconds(),
-            "status": "succeeded",
+            "status": "completed",
             "model": result.model,
             "stop_reason": result.stop_reason,
             "input_tokens": result.input_tokens,

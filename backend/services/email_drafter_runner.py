@@ -76,8 +76,11 @@ class EmailDrafterRunResult:
     # Top-level error message if the agent itself failed.
     error: Optional[str] = None
 
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    # Datetime, not str, so Firestore stores them as native Timestamp
+    # (queryable for "runs since X" / latency analysis). Callers that need
+    # an ISO string can call `.isoformat()` on the value.
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 def run_email_drafter_for_lead(
@@ -85,6 +88,7 @@ def run_email_drafter_for_lead(
     *,
     skip_gmail: bool = False,
     skip_drive: bool = False,
+    run_id: str | None = None,
 ) -> EmailDrafterRunResult:
     """
     Run the Email Drafter end-to-end for one lead.
@@ -97,12 +101,17 @@ def run_email_drafter_for_lead(
             output without creating real drafts.
         skip_drive: skip Drive record write. Useful for the same reason
             as skip_gmail.
+        run_id: optional run_id to use for the agent_runs record. When the
+            dispatcher behind POST /agents/run has already written a pending
+            stub, it passes that run_id here so the terminal write merges
+            into the same doc. When None (existing GHL webhook path), the
+            runner generates its own UUID.
 
     Returns:
         EmailDrafterRunResult — never raises. Failures are captured on
         the result object so a BackgroundTask runner can log + move on.
     """
-    run_id = str(uuid.uuid4())
+    run_id = run_id or str(uuid.uuid4())
     started_at = datetime.now(tz=timezone.utc)
 
     log_extra = {
@@ -123,8 +132,8 @@ def run_email_drafter_for_lead(
             contact_id=input_.contact_id,
             status="failed",
             error=f"{type(exc).__name__}: {exc}",
-            started_at=started_at.isoformat(timespec="seconds"),
-            finished_at=finished_at.isoformat(timespec="seconds"),
+            started_at=started_at,
+            finished_at=finished_at,
         )
         _safe_put_agent_run(result, input_)
         return result
@@ -226,8 +235,8 @@ def run_email_drafter_for_lead(
         drive_file_id=drive_file_id,
         drive_web_link=drive_web_link,
         drive_error=drive_error,
-        started_at=started_at.isoformat(timespec="seconds"),
-        finished_at=finished_at.isoformat(timespec="seconds"),
+        started_at=started_at,
+        finished_at=finished_at,
     )
 
     # 5. agent_runs log.
@@ -448,6 +457,11 @@ def _safe_put_agent_run(
     failure — the run itself is the source of truth, the Firestore
     record is an audit trail.
     """
+    
+    duration_seconds: Optional[float] = None
+    if result.started_at and result.finished_at:
+        duration_seconds = (result.finished_at - result.started_at).total_seconds()
+
     record: dict = {
         "run_id": result.run_id,
         "agent": "email_drafter",
@@ -456,6 +470,7 @@ def _safe_put_agent_run(
         "status": result.status,
         "started_at": result.started_at,
         "finished_at": result.finished_at,
+        "duration_seconds": duration_seconds,
         "from_user": input_.from_user,
         "contact_email": input_.contact_email,
         "contact_municipality": input_.contact_municipality,
@@ -479,6 +494,7 @@ def _safe_put_agent_run(
                 "cache_read_tokens": result.draft.cache_read_tokens,
                 "context_chunk_count": result.draft.context_chunk_count,
                 "suggested_send": result.draft.suggested_send,
+                "suggested_send_reason": result.draft.suggested_send_reason,
                 "subject": result.draft.subject,
             }
         )

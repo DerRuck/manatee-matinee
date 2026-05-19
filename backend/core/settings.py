@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     ghl_api_version_header: str = "2021-07-28"  # Required header on every v2 call.
     ghl_webhook_secret: str = ""  # For verifying inbound webhook signatures.
 
+    # --- Agents API auth ---
+    # Shared-secret header for /agents/* routes (workbook + Cowork trigger
+    # surface). Header: X-CHAWQ-Secret.
+    # Populate via Secret Manager in prod.
+    chawq_shared_secret: str = ""
+
     # --- Firestore ---
     firestore_contacts_collection: str = "contacts"
     firestore_agent_runs_collection: str = "agent_runs"
