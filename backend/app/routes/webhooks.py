@@ -29,7 +29,9 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 
 from core.settings import get_settings
 from services.email_drafter_runner import run_email_drafter_for_ghl_payload
-from services.research_agent.adapter import run_research_agent_for_ghl_payload
+# Restored when feat/research-agent merges to dev (carries the research_agent module).
+# Commented out on feat/agent-runs so the app boots without that module present.
+# from services.research_agent.research_ import run_research_agent_for_ghl_payload
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ router = APIRouter()
 # Luis's deep_research runner registers when that side lands.
 DISPATCH_HANDLERS: dict[str, Callable[[dict[str, Any]], None]] = {
     "email_drafter": run_email_drafter_for_ghl_payload,
-    "deep_research": run_research_agent_for_ghl_payload,
+    # "deep_research": run_research_agent_for_ghl_payload,  # restored with the import above when feat/research-agent merges
 }
 
 

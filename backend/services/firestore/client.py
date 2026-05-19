@@ -45,13 +45,46 @@ def put_agent_run(run_id: str, record: dict[str, Any]) -> None:
     """
     Upsert one row in the `agent_runs` collection, keyed by run_id.
 
-    The record dict shape is intentionally not enforced here — the runner that
-    composes it owns the schema. Document ID = run_id for direct lookup later.
+    Uses set(merge=True) so a runner's terminal write layers cleanly on top
+    of a pending stub written by POST /agents/run — fields like `created_at`,
+    `triggered_by`, and `inputs` survive the terminal write.
+
+    The record dict shape is intentionally not enforced here — the runner
+    that composes it owns the schema. Document ID = run_id for direct lookup.
     """
     client = _get_client()
     settings = get_settings()
     collection = settings.firestore_agent_runs_collection
-    client.collection(collection).document(run_id).set(record)
+    client.collection(collection).document(run_id).set(record, merge=True)
+
+
+def get_agent_run(run_id: str) -> dict[str, Any] | None:
+    """
+    Read one row from `agent_runs` by run_id. Returns the raw dict or None
+    if no document exists. Used by GET /agents/runs/{run_id} for polling.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_agent_runs_collection
+    snap = client.collection(collection).document(run_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+def update_agent_run(run_id: str, fields: dict[str, Any]) -> None:
+    """
+    Partial update to one `agent_runs` row. Use for status transitions
+    (pending → running → completed) where only a few fields change.
+
+    Implemented as set(merge=True) so the call is upsert-safe: if the stub
+    write failed for any reason, the runner's terminal write still lands a
+    record rather than silently dropping the run.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_agent_runs_collection
+    client.collection(collection).document(run_id).set(fields, merge=True)
 
 
 # ---------------------------------------------------------------------------
