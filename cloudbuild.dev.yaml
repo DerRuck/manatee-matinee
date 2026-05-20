@@ -34,7 +34,7 @@ steps:
       - '--region=us-central1'
       - '--project=chawq-manatee-matinee'
       - '--build-service-account=projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
-      - '--set-env-vars=ENV=dev,GCP_PROJECT_ID=chawq-manatee-matinee,GCP_LOCATION=us-central1,CLAUDE_MODEL=claude-sonnet-4-6,DRIVE_WATCH_FOLDER_ID=13YB4orVBxyB_djsvS53Jif85MBR7uC6K,GHL_LOCATION_ID=As8Nc8kEs6J86YgDIi9Q'
+      - '--set-env-vars=ENV=dev,GCP_PROJECT_ID=chawq-manatee-matinee,GCP_LOCATION=us-central1,CLAUDE_MODEL=claude-sonnet-4-6,DRIVE_WATCH_FOLDER_ID=13YB4orVBxyB_djsvS53Jif85MBR7uC6K,GHL_LOCATION_ID=As8Nc8kEs6J86YgDIi9Q,DRIVE_OUTPUT_ROOT_FOLDER_ID=1CJmk437SVaFcWqVBrsIOMYO1ac7oZHHq'
       - '--set-secrets=ANTHROPIC_API_KEY=anthropic-api-key-dev:latest,GHL_PIT=ghl-pit:latest,GHL_WEBHOOK_SECRET=ghl-webhook-secret:latest,CHAWQ_SHARED_SECRET=chawq-shared-secret:latest'
       - '--service-account=chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
 
