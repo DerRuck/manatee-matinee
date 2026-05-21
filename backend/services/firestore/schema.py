@@ -83,10 +83,28 @@ class Document(BaseModel):
     project_name: list[str] = Field(default_factory=list)
 
     # Origin tag for the source folder. V1 values:
-    #   plaud, leads, industry_context, email_data, iflytek
+    #   plaud, leads, industry_context, email_inbox, iflytek
     # Used by retrieval to filter dev/prod data, by the ingester to pick
     # a per-source resolver, and by ops to count corpus size by source.
     data_source: Optional[str] = None
+
+    # Email-specific metadata populated by resolve_email_inbox from the
+    # structured summary header. Null for non-email documents.
+    # - email_message_id: RFC 5322 Message-ID header (the canonical identity)
+    # - email_thread_id: Gmail thread ID, for grouping replies across messages
+    # - email_direction: inbound | outbound | internal (vs chawq.org domain)
+    email_message_id: Optional[str] = None
+    email_thread_id: Optional[str] = None
+    email_direction: Optional[Literal["inbound", "outbound", "internal"]] = None
+
+    # When the underlying event actually happened — distinct from
+    # drive_modified_time (file mtime; used for the idempotency check)
+    # and ingested_at (pipeline metadata). For email, this comes from
+    # the RFC 2822 Date header parsed out of the summary file. For
+    # other sources, the orchestrator falls back to drive_modified_time
+    # so the field is always populated and recency-aware retrieval can
+    # rely on it. Tz-aware datetime.
+    event_time: Optional[datetime] = None
 
 
 class Chunk(BaseModel):
@@ -120,6 +138,17 @@ class Chunk(BaseModel):
     municipality: list[str] = Field(default_factory=list)
     project_name: list[str] = Field(default_factory=list)
     data_source: Optional[str] = None
+
+    # Email metadata mirrored from the parent Document, so chunk-level
+    # filters can scope retrieval by thread/direction without a join.
+    email_message_id: Optional[str] = None
+    email_thread_id: Optional[str] = None
+    email_direction: Optional[Literal["inbound", "outbound", "internal"]] = None
+
+    # Mirrored from the parent Document. Lets retrieval order or filter
+    # by when the event happened (email Date header for email; falls
+    # back to drive_modified_time for other sources). See Document.event_time.
+    event_time: Optional[datetime] = None
 
     # Optional positional info. V1 leaves these empty; populate later when
     # the parser is smart enough to track headings or page numbers.

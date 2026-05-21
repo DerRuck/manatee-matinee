@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
     # --- Firestore ---
     firestore_contacts_collection: str = "contacts"
+    firestore_municipalities_collection: str = "municipalities"
     firestore_agent_runs_collection: str = "agent_runs"
     firestore_feedback_collection: str = "feedback"
     firestore_prompt_versions_collection: str = "prompt_versions"
@@ -59,6 +60,9 @@ class Settings(BaseSettings):
     # `vector_chunks` placeholder which was scaffolding from before the lock.
     firestore_documents_collection: str = "documents"
     firestore_chunks_collection: str = "chunks"
+    # System-level state docs (e.g. Drive watch pageToken). One collection,
+    # well-known doc IDs.
+    firestore_system_collection: str = "system"
 
     # --- Vector embeddings (Vertex) ---
     vertex_embedding_model: str = "text-embedding-005"
