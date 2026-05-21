@@ -9,6 +9,14 @@ Run from the repo root:
     # Override the context with a specific sample
     python -m backend.scripts.run_presentation_agent PA-CURIOSITY --context rookery_bay
 
+    # Pull a REAL contact from Firestore by GHL contact id, then layer
+    # meeting-specific fields the contact doc doesn't store:
+    python -m backend.scripts.run_presentation_agent PA-STEP4 \\
+        --contact-id 0I21saCPXJVEbdncGXEW \\
+        --override meeting_date='June 12, 2026' \\
+        --override audience='City Manager, PW Director' \\
+        --override problem_area_focus='Hogtown Creek stormwater retrofit'
+
     # Save the outline as JSON
     python -m backend.scripts.run_presentation_agent PA-CURIOSITY --save outline.json
 
@@ -77,6 +85,29 @@ SAMPLE_CONTEXTS: dict[str, dict] = {
             "Show that nature-based approach is cheaper than seawalls and that "
             "P3 funding removes the upfront-cost objection."
         ),
+        # PA-STEP4 specifics
+        "problem_area_focus": (
+            "Sarasota Bay seagrass loss in three shoreline zones near downtown "
+            "(documented loss since 2018, ~22 acres total)."
+        ),
+        # PA-KICKOFF specifics
+        "project_name": "Sarasota Bay Seagrass Restoration Pilot — Phase 1",
+        "funding_summary": (
+            "FDEP grant $1.2M + RESTORE Act $800K + C-HAWQ Exploration Grant "
+            "$200K + municipal in-kind $150K"
+        ),
+        "signed_p3_date": "August 14, 2026",
+        "gc_partner": "EcoCoastal Engineering (Tampa, FL)",
+        "attendee_roster": (
+            "Municipality: City Manager, Public Works Director, Sustainability "
+            "Coordinator · C-HAWQ: Emily Boyd, Ryan Begin · GC: EcoCoastal "
+            "Engineering (Tim Park, lead) · Grant admin: FDEP Section 320 program"
+        ),
+        "open_items": (
+            "Permit timeline confirmation with FDEP (owner: Tim Park, due 9/15); "
+            "site-access easement for monitoring stations (owner: city, due 9/22); "
+            "academic partner letter of commitment (owner: Ryan Begin, due 9/30)."
+        ),
     },
 }
 
@@ -122,11 +153,28 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Run the C-HAWQ Presentation Agent against a sample context."
     )
-    ap.add_argument("outline_type", choices=["PA-CURIOSITY"])
+    ap.add_argument("outline_type", choices=["PA-CURIOSITY", "PA-STEP4", "PA-KICKOFF"])
     ap.add_argument(
         "--context", default=None,
         choices=list(SAMPLE_CONTEXTS.keys()),
         help="Sample context key (defaults to rookery_bay)",
+    )
+    ap.add_argument(
+        "--contact-id", default=None,
+        help=(
+            "GHL contact id (Firestore doc id) to load from the `contacts` "
+            "collection. Overrides --context. Layer meeting-specific fields "
+            "with --override key=value (audience, meeting_date, etc.)."
+        ),
+    )
+    ap.add_argument(
+        "--override", action="append", default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Add or override a context field. Repeatable. Example: "
+            "--override meeting_date='June 12, 2026' "
+            "--override audience='City Manager, PW Director'"
+        ),
     )
     ap.add_argument("--version", type=int, default=1)
     ap.add_argument("--save", help="Save validated outline JSON to this path")
@@ -142,13 +190,34 @@ def main() -> None:
         print("ERROR: ANTHROPIC_API_KEY not set. export ANTHROPIC_API_KEY=sk-ant-...")
         sys.exit(1)
 
-    context_key = args.context or "rookery_bay"
-    context = SAMPLE_CONTEXTS[context_key]
+    overrides: dict[str, str] = {}
+    for raw in args.override:
+        if "=" not in raw:
+            print(f"WARN: ignoring malformed --override '{raw}' (expected KEY=VALUE)")
+            continue
+        k, _, v = raw.partition("=")
+        overrides[k.strip()] = v.strip()
+
+    if args.contact_id:
+        from services.firestore.client import get_contact
+        from services.firestore.contact_context import build_context_from_contact
+
+        raw_contact = get_contact(args.contact_id)
+        if raw_contact is None:
+            print(f"ERROR: contact {args.contact_id} not found in Firestore.")
+            sys.exit(2)
+        context = build_context_from_contact(raw_contact, overrides=overrides)
+        context_label = f"firestore:{args.contact_id}"
+    else:
+        context_key = args.context or "rookery_bay"
+        context = dict(SAMPLE_CONTEXTS[context_key])
+        context.update(overrides)
+        context_label = context_key
 
     agent = PresentationAgent(args.outline_type, version=args.version)
 
     if not args.quiet:
-        print(f"Outline type: {args.outline_type}  context: {context_key}")
+        print(f"Outline type: {args.outline_type}  context: {context_label}")
 
     outline, meta = agent.run(
         context,

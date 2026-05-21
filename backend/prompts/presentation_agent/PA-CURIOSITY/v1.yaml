@@ -7,7 +7,7 @@ name: Curiosity Meeting Deck
 version: 1
 binder_anchor: ppb_S05_s5_1_internal_curiosity_meeting
 description: >
-  Builds a 3-7 slide deck outline for a Curiosity Meeting — the first formal
+  Builds a 5-10 slide deck outline for a Curiosity Meeting — the first formal
   C-HAWQ presentation to a champion's wider staff after the intake meeting.
   Goal is curiosity, not commitment. Optimized for the C-HAWQ visual
   language (three-pillar layouts, named subtitles, brand footer) and feeds
@@ -108,7 +108,7 @@ system: |
      "let us know if you're interested" — name a specific meeting,
      working session, or document review).
 
-  3-7 slides total. Most curiosity decks land at 5. Add a quote slide or
+  5-10 slides total. Most curiosity decks land at 7. Add a quote slide or
   team_bio slide only if there's a clear reason — a champion who has
   already said something quotable, or a team member with a credential
   the audience will recognize.
@@ -159,7 +159,7 @@ user: |
   ```
   {%- endif %}
 
-  Produce a 3-7 slide outline following the curiosity meeting structure
+  Produce a 5-10 slide outline following the curiosity meeting structure
   in the system prompt. Use three_pillar layouts where the content
   breaks naturally into three. Localize every statistic. Specify a
   concrete suggested_next_step in the closing slide.

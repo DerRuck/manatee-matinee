@@ -22,6 +22,8 @@ Architecture mirrors services/research_agent/schema.py:
         ClosingSlide        (CTA + contact line)
   - Findings              : discriminated union, typed per outline_type_id
         CuriosityMeetingFindings   -> PA-CURIOSITY
+        Step4CustomDeckFindings    -> PA-STEP4
+        KickoffDeckFindings        -> PA-KICKOFF
 
 Adding a new outline type = add a new findings sub-model with
 `outline_type: Literal["..."]` and append it to the Findings union.
@@ -330,14 +332,137 @@ class CuriosityMeetingFindings(BaseModel):
     )
 
     slides: list[SlideContent] = Field(
-        min_length=3,
-        max_length=7,
-        description="3-7 slides. Curiosity decks are tight — every slide earns its place.",
+        min_length=5,
+        max_length=10,
+        description="5-10 slides. Most curiosity decks land at 7.",
     )
 
     suggested_next_step: str = Field(
         min_length=1,
         description="The concrete ask in the closing slide — what we want the audience to commit to",
+    )
+
+
+# =============================================================================
+# PA-STEP4 — Custom Step 4 Deck
+#
+# The Step 4 deck Ryan builds after a successful intake meeting. Audience is
+# the Champion + their wider team (department head, city manager, sometimes
+# a commissioner). Built on the binder's 7-slide skeleton:
+#   1. Cover
+#   2. The Problem in Their Community  (localized data)
+#   3. What's Possible                  (1-2 Florida comparables)
+#   4. How C-HAWQ Helps
+#   5. The Path Forward                 (conversation framework, not contract)
+#   6. The Team
+#   7. Next Step
+# Slide count 6-9 leaves room for an optional data_point or quote.
+# =============================================================================
+
+class Step4CustomDeckFindings(BaseModel):
+    outline_type: Literal["PA-STEP4"] = "PA-STEP4"
+
+    audience: str = Field(
+        min_length=1,
+        description="Who is in the room — Champion + their team (city manager, department head, commissioner)",
+    )
+    meeting_objective: str = Field(
+        min_length=1,
+        description="What success looks like — usually 'align on the path forward and a concrete next step'",
+    )
+    champion_name: str | None = Field(
+        default=None,
+        description="The Champion who arranged this meeting",
+    )
+
+    deck_title: str = Field(min_length=1, description="Cover title")
+    deck_subtitle: str | None = Field(
+        default=None,
+        description="Cover subtitle — usually the municipality or project name",
+    )
+
+    problem_area_focus: str = Field(
+        min_length=1,
+        description=(
+            "The specific waterway/habitat/site the Champion named at intake. "
+            "Drives every localized data point and visual on slide 2."
+        ),
+    )
+
+    slides: list[SlideContent] = Field(
+        min_length=6,
+        max_length=9,
+        description=(
+            "6-9 slides. The binder skeleton lands at 7. Optional 8th/9th: an "
+            "extra data_point or quote when a high-impact one is available."
+        ),
+    )
+
+    suggested_next_step: str = Field(
+        min_length=1,
+        description="The concrete ask on the closing slide — a meeting, site visit, or document review",
+    )
+
+
+# =============================================================================
+# PA-KICKOFF — Project Kickoff Deck (Step 9)
+#
+# The first formal meeting after the P3 agreement is signed. Attendees are
+# the municipality, the C-HAWQ team, the engineering/GC partner, and (often)
+# the grant administrator. Binder skeleton has 8 sections:
+#   1. Welcome & Introductions
+#   2. Project Overview
+#   3. Funding Structure Confirmed       (actual figures)
+#   4. Roles & Responsibilities
+#   5. Project Timeline & Milestones
+#   6. Communication Cadence
+#   7. Open Items & Risk Register
+#   8. Next Steps
+# Slide count 7-12 — bigger than a curiosity or Step 4 deck because this one
+# is operational, not persuasive.
+# =============================================================================
+
+class KickoffDeckFindings(BaseModel):
+    outline_type: Literal["PA-KICKOFF"] = "PA-KICKOFF"
+
+    project_name: str = Field(
+        min_length=1,
+        description="The official project name as it appears in the signed P3 agreement",
+    )
+    audience: str = Field(
+        min_length=1,
+        description="All parties present — municipality, C-HAWQ, GC, grant admin",
+    )
+
+    deck_title: str = Field(min_length=1)
+    deck_subtitle: str | None = None
+
+    slides: list[SlideContent] = Field(
+        min_length=7,
+        max_length=12,
+        description="7-12 slides. Most kickoff decks land at 8 — one per section.",
+    )
+
+    communication_cadence: str = Field(
+        min_length=1,
+        description=(
+            "Plain-language summary of how the core team will operate — "
+            "meeting frequency, who's on the call, how decisions escalate."
+        ),
+    )
+
+    top_risks: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Surfaced from the risk register slide. Each entry is one sentence: "
+            "the risk + who owns mitigation. Empty list is allowed if there are none."
+        ),
+    )
+
+    suggested_next_step: str = Field(
+        min_length=1,
+        description="The concrete next action — usually the date of the first project-cadence call",
     )
 
 
@@ -348,6 +473,8 @@ class CuriosityMeetingFindings(BaseModel):
 Findings = Annotated[
     Union[
         CuriosityMeetingFindings,
+        Step4CustomDeckFindings,
+        KickoffDeckFindings,
     ],
     Field(discriminator="outline_type"),
 ]
@@ -422,6 +549,8 @@ class PresentationOutline(BaseModel):
 
 _FINDINGS_TYPE_MAP: dict[str, type] = {
     "PA-CURIOSITY": CuriosityMeetingFindings,
+    "PA-STEP4":     Step4CustomDeckFindings,
+    "PA-KICKOFF":   KickoffDeckFindings,
 }
 
 

@@ -68,8 +68,28 @@ def _valid_outline_payload() -> dict:
                     ],
                 },
                 {
-                    "layout": "closing",
+                    "layout": "bullet",
                     "slide_number": 3,
+                    "title": "What C-HAWQ Brings",
+                    "bullets": [
+                        "Exploration grants up to $200K at no cost to the reserve",
+                        "Independent academic partnerships through USF and FGCU",
+                        "P3 procurement support and engineering coordination",
+                    ],
+                },
+                {
+                    "layout": "bullet",
+                    "slide_number": 4,
+                    "title": "Why This Project Fits",
+                    "bullets": [
+                        "Tidal-creek connectivity matches the reserve's research mandate",
+                        "Localized data from Henderson Creek already documented",
+                        "Funding pathway via FDEP Section 320 is open through Q4",
+                    ],
+                },
+                {
+                    "layout": "closing",
+                    "slide_number": 5,
                     "call_to_action": "Schedule a Step 4 working session for the week of June 9.",
                     "leave_behind_summary": "C-HAWQ funds feasibility, lines up academic partners, and walks the project through P3 finance.",
                 },
@@ -87,10 +107,10 @@ def test_valid_outline_validates():
     outline = PresentationOutline.model_validate(_valid_outline_payload())
     assert outline.outline_type_id == "PA-CURIOSITY"
     assert outline.findings.outline_type == "PA-CURIOSITY"
-    assert len(outline.findings.slides) == 3
+    assert len(outline.findings.slides) == 5
     assert isinstance(outline.findings.slides[0], TitleSlide)
     assert isinstance(outline.findings.slides[1], ThreePillarSlide)
-    assert isinstance(outline.findings.slides[2], ClosingSlide)
+    assert isinstance(outline.findings.slides[-1], ClosingSlide)
 
 
 def test_parse_response_round_trip():
@@ -169,7 +189,9 @@ def test_bullet_slide_min_max_bullets():
 # Findings min/max + curiosity-specific shape
 # ---------------------------------------------------------------------------
 
-def test_findings_requires_at_least_three_slides():
+def test_findings_requires_at_least_five_slides():
+    """Curiosity decks below 5 slides fail validation — the deck needs
+    enough room to land the Why/What/How beats per the binder skeleton."""
     with pytest.raises(ValidationError):
         CuriosityMeetingFindings(
             audience="staff",
@@ -177,19 +199,21 @@ def test_findings_requires_at_least_three_slides():
             deck_title="Test",
             slides=[
                 TitleSlide(slide_number=1, title="x"),
-                ClosingSlide(slide_number=2, call_to_action="meet next week"),
+                BulletSlide(slide_number=2, title="s2", bullets=["a", "b"]),
+                BulletSlide(slide_number=3, title="s3", bullets=["a", "b"]),
+                ClosingSlide(slide_number=4, call_to_action="meet next week"),
             ],
             suggested_next_step="meet next week",
         )
 
 
-def test_findings_caps_at_seven_slides():
+def test_findings_caps_at_ten_slides():
     slides = [TitleSlide(slide_number=1, title="x")]
     slides.extend(
         BulletSlide(slide_number=i, title=f"s{i}", bullets=["a", "b"])
-        for i in range(2, 8)
+        for i in range(2, 11)
     )
-    slides.append(ClosingSlide(slide_number=9, call_to_action="next"))
+    slides.append(ClosingSlide(slide_number=12, call_to_action="next"))
     with pytest.raises(ValidationError):
         CuriosityMeetingFindings(
             audience="staff",

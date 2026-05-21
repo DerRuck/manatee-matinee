@@ -15,7 +15,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
-from services.hello_world_runner import run_hello_world_for_ghl_contact
+from services.webhook_router import dispatch_ghl_payload
 
 logger = logging.getLogger(__name__)
 
@@ -120,14 +120,19 @@ async def ghl_webhook(
         logger.warning("ghl webhook body was not valid JSON — ignoring")
         payload = {}
 
-    # Sprint demo: every GHL webhook fires the Hello World agent.
-    # Drive output + Firestore log layer into
-    # run_hello_world_for_ghl_contact, not this handler.
+    # Route the payload to the right agent. The GHL Workflow sets an
+    # `agent_type` Custom Data field (e.g. 'presentation:PA-STEP4',
+    # 'research:LOBBY-1') and the dispatcher fans out from there. Missing
+    # or unknown agent_type falls back to hello_world so a misconfigured
+    # Workflow can't silently drop the contact.
     if payload:
-        background_tasks.add_task(run_hello_world_for_ghl_contact, payload)
+        background_tasks.add_task(dispatch_ghl_payload, payload)
         logger.info(
-            "ghl webhook -> hello_world runner enqueued",
-            extra={"contact_id": payload.get("contact_id") or payload.get("id")},
+            "ghl webhook dispatched",
+            extra={
+                "contact_id": payload.get("contact_id") or payload.get("id"),
+                "agent_type": payload.get("agent_type") or "(absent)",
+            },
         )
 
     return {"status": "accepted"}

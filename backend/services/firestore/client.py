@@ -40,6 +40,49 @@ def _get_client() -> firestore.Client:
     return _client
 
 
+# ---------------------------------------------------------------------------
+# Contacts (GHL backfill)
+# ---------------------------------------------------------------------------
+
+def get_contact(contact_id: str) -> dict[str, Any] | None:
+    """Fetch one row from the `contacts` collection by GHL contact id.
+
+    Returns the raw document dict (GHL contact shape: firstName, lastName,
+    email, customFields[], tags[], locationId, etc.) or None if missing.
+    The document ID matches the GHL contact id.
+    """
+    client = _get_client()
+    settings = get_settings()
+    snap = (
+        client.collection(settings.firestore_contacts_collection)
+        .document(contact_id)
+        .get()
+    )
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+def list_contacts(limit: int = 25) -> list[dict[str, Any]]:
+    """Stream up to `limit` contacts from the `contacts` collection.
+
+    Used by browse scripts and smoke tests to discover which contact IDs
+    exist in the backfill without hitting GHL directly.
+    """
+    client = _get_client()
+    settings = get_settings()
+    out: list[dict[str, Any]] = []
+    for snap in (
+        client.collection(settings.firestore_contacts_collection)
+        .limit(limit)
+        .stream()
+    ):
+        doc = snap.to_dict() or {}
+        doc.setdefault("id", snap.id)
+        out.append(doc)
+    return out
+
+
 def put_agent_run(run_id: str, record: dict[str, Any]) -> None:
     """
     Upsert one row in the `agent_runs` collection, keyed by run_id.

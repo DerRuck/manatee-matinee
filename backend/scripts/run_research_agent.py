@@ -183,8 +183,20 @@ SAMPLE_CONTACTS: dict[str, dict] = {
 
 
 # ---------------------------------------------------------------------------
-# Pretty-print helper
+# CLI helpers
 # ---------------------------------------------------------------------------
+
+def _parse_overrides(items: list[str]) -> dict[str, str]:
+    """Parse repeated --override KEY=VALUE flags into a dict."""
+    out: dict[str, str] = {}
+    for raw in items:
+        if "=" not in raw:
+            print(f"WARN: ignoring malformed --override '{raw}' (expected KEY=VALUE)")
+            continue
+        k, _, v = raw.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
 
 def print_brief_summary(brief: ResearchBrief) -> None:
     print("\n" + "=" * 70)
@@ -262,6 +274,22 @@ def main() -> None:
         choices=list(SAMPLE_CONTACTS.keys()),
         help="Sample contact key (defaults to the first matching contact for the type)",
     )
+    ap.add_argument(
+        "--contact-id", default=None,
+        help=(
+            "GHL contact id (Firestore doc id) to load from the `contacts` "
+            "collection. Overrides --contact. Use with --override key=value "
+            "to layer meeting-specific fields the contact doc doesn't store."
+        ),
+    )
+    ap.add_argument(
+        "--override", action="append", default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Layer a meeting-specific field on top of the Firestore contact. "
+            "Repeatable. Example: --override jurisdiction_type=county"
+        ),
+    )
     ap.add_argument("--version", type=int, default=1)
     ap.add_argument("--save", help="Save validated brief JSON to this path")
     ap.add_argument("--model", help="Override the model in the YAML")
@@ -276,25 +304,40 @@ def main() -> None:
         print("ERROR: ANTHROPIC_API_KEY not set. export ANTHROPIC_API_KEY=sk-ant-...")
         sys.exit(1)
 
-    # Pick a sensible default contact for the type if none specified
-    type_defaults = {
-        "S6-1": "sample_seagrass",
-        "PW-3": "sample_pw3",
-        "PW-1": "fsbpa_2026",
-        "LOBBY-1": "sample_lobby",
-        "S1-2": "sample_linkedin",
-        "S1-4": "sample_s14",
-        "S3-3": "sample_commission",
-        "S3-PREP": "sample_intake",
-        "S4-DECK": "sample_seagrass_deck",
-    }
-    contact_key = args.contact or type_defaults.get(args.research_type, "stuart_pw3")
-    contact = SAMPLE_CONTACTS[contact_key]
+    overrides = _parse_overrides(args.override)
+
+    if args.contact_id:
+        from services.firestore.client import get_contact
+        from services.firestore.contact_context import build_context_from_contact
+
+        raw = get_contact(args.contact_id)
+        if raw is None:
+            print(f"ERROR: contact {args.contact_id} not found in Firestore.")
+            sys.exit(2)
+        contact = build_context_from_contact(raw, overrides=overrides)
+        contact_label = f"firestore:{args.contact_id}"
+    else:
+        # Pick a sensible default contact for the type if none specified
+        type_defaults = {
+            "S6-1": "sample_seagrass",
+            "PW-3": "sample_pw3",
+            "PW-1": "fsbpa_2026",
+            "LOBBY-1": "sample_lobby",
+            "S1-2": "sample_linkedin",
+            "S1-4": "sample_s14",
+            "S3-3": "sample_commission",
+            "S3-PREP": "sample_intake",
+            "S4-DECK": "sample_seagrass_deck",
+        }
+        contact_key = args.contact or type_defaults.get(args.research_type, "stuart_pw3")
+        contact = dict(SAMPLE_CONTACTS[contact_key])
+        contact.update(overrides)
+        contact_label = contact_key
 
     agent = ResearchAgent(args.research_type, version=args.version)
 
     if not args.quiet:
-        print(f"Research type: {args.research_type}  contact: {contact_key}")
+        print(f"Research type: {args.research_type}  contact: {contact_label}")
 
     brief, meta = agent.run(
         contact,
