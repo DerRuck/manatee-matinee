@@ -71,7 +71,7 @@ def render_docx(result: ScoringResult) -> bytes:
 
     add_meta_line(
         doc,
-        generated=result.generated_at[:16].replace("T", " ") + " UTC",
+        generated=result.generated_at.strftime("%B %d, %Y at %H:%M UTC"),
         run=result.run_id[:8],
     )
 
