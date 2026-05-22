@@ -128,10 +128,20 @@ def print_outline_summary(outline: PresentationOutline) -> None:
     f = outline.findings
     print(f"\nFindings ({f.outline_type}):")
     print(f"  Audience:           {f.audience}")
-    print(f"  Objective:          {f.meeting_objective}")
+    if getattr(f, "meeting_objective", None):
+        print(f"  Objective:          {f.meeting_objective}")
+    if getattr(f, "project_name", None):
+        print(f"  Project:            {f.project_name}")
     print(f"  Deck title:         {f.deck_title}")
     print(f"  Slide count:        {len(f.slides)}")
     print(f"  Next step ask:      {f.suggested_next_step}")
+    if getattr(f, "communication_cadence", None):
+        print(f"  Cadence:            {f.communication_cadence}")
+    top_risks = getattr(f, "top_risks", None)
+    if top_risks:
+        print(f"  Top risks ({len(top_risks)}):")
+        for r in top_risks:
+            print(f"    - {r}")
 
     print(f"\nSlides:")
     for s in f.slides:
