@@ -306,7 +306,19 @@ def run(
     parsed["generated_at"] = datetime.now(timezone.utc).isoformat()
     parsed["triggering_event"] = context.get("triggering_event")
 
-    outline = PresentationOutline.model_validate(parsed)
+    try:
+        outline = PresentationOutline.model_validate(parsed)
+    except Exception:
+        dump_path = Path("/tmp") / f"presentation_raw_{cfg['id']}_{parsed.get('run_id', 'unknown')}.json"
+        dump_path.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+        max_t = cfg["model"].get("max_tokens", 8000)
+        used = final_message.usage.output_tokens
+        truncation_hint = " — output_tokens hit max_tokens, likely truncated" if used >= max_t - 50 else ""
+        print(
+            f"\nValidation failed; raw parsed JSON saved to {dump_path} "
+            f"(output_tokens={used}/{max_t}{truncation_hint})"
+        )
+        raise
 
     server_tool_use = getattr(final_message.usage, "server_tool_use", None)
     actual_searches = (
