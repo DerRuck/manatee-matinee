@@ -60,7 +60,9 @@ def get_contact(contact_id: str) -> dict[str, Any] | None:
     )
     if not snap.exists:
         return None
-    return snap.to_dict()
+    doc = snap.to_dict() or {}
+    doc.setdefault("id", snap.id)
+    return doc
 
 
 def list_contacts(limit: int = 25) -> list[dict[str, Any]]:

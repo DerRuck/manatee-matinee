@@ -84,16 +84,17 @@ def _fetch_contact(contact_id: str) -> dict[str, Any] | None:
 def _fetch_agent_runs(contact_id: str, limit: int) -> list[dict[str, Any]]:
     """Pull every agent_runs row for this contact, newest first.
 
-    Falls back to an empty list if the Firestore call fails — a scoring
-    agent that can score with no run history is still useful for brand
-    new Step 1 contacts.
+    A Firestore failure (e.g. missing composite index) is re-raised after
+    logging — silently returning [] previously hid an index miss for weeks
+    and made the scoring agent produce wrong results for every contact
+    with run history.
     """
-    try:
-        from services.firestore.client import _get_client
-        from core.settings import get_settings
+    from services.firestore.client import _get_client
+    from core.settings import get_settings
 
-        client = _get_client()
-        settings = get_settings()
+    client = _get_client()
+    settings = get_settings()
+    try:
         query = (
             client.collection(settings.firestore_agent_runs_collection)
             .where("contact_id", "==", contact_id)
@@ -103,10 +104,10 @@ def _fetch_agent_runs(contact_id: str, limit: int) -> list[dict[str, Any]]:
         return [snap.to_dict() for snap in query.stream()]
     except Exception:
         logger.exception(
-            "scoring context: agent_runs fetch failed",
+            "scoring context: agent_runs fetch failed — check firestore.indexes.json is deployed",
             extra={"contact_id": contact_id},
         )
-        return []
+        raise
 
 
 def _fetch_communications(contact_id: str, limit: int) -> list[dict[str, Any]]:
