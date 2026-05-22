@@ -272,7 +272,7 @@ class ClosingSlide(_SlideBase):
         description="The specific ask — what does the audience do next?",
     )
     contact_line: str = Field(
-        default="CHAWQ.org | hello@chawq.org",
+        default="CHAWQ.org | contact@chawq.org",
         description="Closing brand line — keep default unless deck calls for a custom one",
     )
     leave_behind_summary: str | None = Field(
