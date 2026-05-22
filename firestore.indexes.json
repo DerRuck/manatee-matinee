@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "agent_runs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "contact_id", "order": "ASCENDING" },
+        { "fieldPath": "finished_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

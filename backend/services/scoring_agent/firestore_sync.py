@@ -29,11 +29,12 @@ from services.scoring_agent.schema import ScoringResult
 logger = logging.getLogger(__name__)
 
 
-def persist_score(result: ScoringResult, meta: dict[str, Any]) -> None:
-    """Write the score to BOTH agent_runs and contact_scores.
+def persist_score(result: ScoringResult, meta: dict[str, Any]) -> dict[str, Any]:
+    """Write the score to agent_runs, contact_scores, and Drive.
 
     Never raises — failures are logged so a downstream consumer (workbook
     UI, dispatcher) can decide what to do without losing the score result.
+    Returns a dict with any Drive file links that succeeded (may be empty).
     """
     record = _build_agent_run_record(result, meta)
 
@@ -53,6 +54,27 @@ def persist_score(result: ScoringResult, meta: dict[str, Any]) -> None:
             "scoring firestore_sync: contact_scores upsert failed",
             extra={"contact_id": result.contact_id},
         )
+
+    drive_links: dict[str, Any] = {}
+    try:
+        from services.scoring_agent.drive_sync import upload_score
+        files = upload_score(result)
+        drive_links = {
+            fmt: meta_["webViewLink"]
+            for fmt, meta_ in files.items()
+            if meta_.get("webViewLink")
+        }
+        logger.info(
+            "scoring firestore_sync: Drive upload succeeded",
+            extra={"contact_id": result.contact_id, "links": drive_links},
+        )
+    except Exception:
+        logger.exception(
+            "scoring firestore_sync: Drive upload failed",
+            extra={"contact_id": result.contact_id},
+        )
+
+    return drive_links
 
 
 def _build_agent_run_record(

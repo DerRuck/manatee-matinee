@@ -146,11 +146,14 @@ def main() -> None:
     if not args.no_persist:
         try:
             from services.scoring_agent.firestore_sync import persist_score
-            persist_score(result, meta)
-            print(
+            drive_links = persist_score(result, meta)
+            persist_line = (
                 f"\nPersisted: agent_runs/{result.run_id}  +  "
                 f"contact_scores/{result.contact_id}"
             )
+            if drive_links.get("docx"):
+                persist_line += f"\nDrive:     {drive_links['docx']}"
+            print(persist_line)
         except Exception as exc:
             print(f"\nWARN: Firestore persist failed: {exc}")
 
