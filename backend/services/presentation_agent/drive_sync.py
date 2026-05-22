@@ -24,8 +24,10 @@ Usage:
 
 from __future__ import annotations
 
+import base64
 import html as html_lib
 import re
+from pathlib import Path
 from typing import Any
 
 from services.presentation_agent.schema import PresentationOutline
@@ -243,22 +245,38 @@ def render_docx(outline: PresentationOutline) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# HTML renderer — self-contained brand-styled deck
+# HTML renderer — self-contained brand-styled deck (1920×1080 per slide)
 #
-# Each slide becomes a 16:9 styled section. CSS lives inline in a single
-# <style> block. Google Fonts are loaded via <link> with web-safe fallbacks
-# so the file still looks reasonable offline. Open in any browser, print to
-# PDF, or screenshare as-is.
-#
-# Brand palette + typography mirror services/branding/docx_styles.py so the
-# Word outline and the HTML deck share one visual language.
+# Styling pulled from the C-HAWQ Design System (Remix): colors_and_type.css
+# + slide-templates.css, inlined as one CSS string below. Layouts the kit
+# doesn't ship (bullet, team_bio, data_point, comparable_project, quote)
+# get extension templates here. Logos embedded as base64 so the .html file
+# is fully self-contained — opens in any browser, prints to PDF cleanly
+# with one slide per page.
 # ---------------------------------------------------------------------------
+
+_BRANDING_ASSETS = Path(__file__).resolve().parent.parent / "branding" / "assets"
+
+
+def _load_logo_data_url(filename: str, mime: str) -> str:
+    """Embed a logo file as a base64 data URL so the deck stays self-contained."""
+    path = _BRANDING_ASSETS / "logos" / filename
+    if not path.exists():
+        return ""
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
+# Loaded once at import. Light-on-blue mark for dark slides; full-color symbol
+# for light slides.
+_LOGO_ON_BLUE = _load_logo_data_url("logo-secondary-symbol-cropped.png", "image/png")
+_LOGO_ON_WHITE = _load_logo_data_url("logo-primary-symbol.jpg", "image/jpeg")
+
 
 _HTML_LAYOUT_LABELS = {
     "title":              "Cover",
     "section_divider":    "Section",
     "three_pillar":       "Three Pillars",
-    "bullet":             "Bullet",
+    "bullet":             "Key Points",
     "team_bio":           "Team",
     "data_point":         "Data Point",
     "comparable_project": "Florida Precedent",
@@ -271,531 +289,459 @@ def _esc(value: Any) -> str:
     return html_lib.escape("" if value is None else str(value), quote=True)
 
 
-def _slide_html(slide: Any) -> str:
+def _chrome_top(label: str, on_blue: bool) -> str:
+    """Top-left logo + top-right eyebrow band on every slide."""
+    logo = _LOGO_ON_BLUE if on_blue else _LOGO_ON_WHITE
+    wm_style = "" if on_blue else ' style="color:var(--chawq-main-blue)"'
+    return (
+        '<div class="chrome-top">'
+        f'<div class="brand"><img src="{logo}" alt="C-HAWQ" />'
+        f'<span class="wm"{wm_style}>C-HAWQ</span></div>'
+        f'<div class="eyebrow">{_esc(label)}</div>'
+        '</div>'
+    )
+
+
+def _chrome_bot(page_num: int, total: int) -> str:
+    return (
+        '<div class="chrome-bot">'
+        '<span>C-HAWQ</span>'
+        f'<span class="page">{page_num:02d} / {total:02d}</span>'
+        '</div>'
+    )
+
+
+def _speaker_notes(slide: Any) -> str:
+    """Speaker notes collapse into a <details>. Hidden in print."""
+    if not getattr(slide, "speaker_notes", None):
+        return ""
+    return (
+        '<details class="speaker-notes">'
+        '<summary>Speaker notes</summary>'
+        f'<p>{_esc(slide.speaker_notes)}</p>'
+        '</details>'
+    )
+
+
+def _slide_html(slide: Any, total: int) -> str:
     layout = slide.layout
     label = _HTML_LAYOUT_LABELS.get(layout, layout)
-    parts: list[str] = [
-        f'<section class="slide slide--{_esc(layout)}">',
-        f'  <div class="slide-chrome"><span class="slide-num">{slide.slide_number}</span>'
-        f'<span class="slide-tag">{_esc(label)}</span></div>',
-    ]
+    n = slide.slide_number
 
     if layout == "title":
-        parts.append(f'  <h1 class="title-line">{_esc(slide.title)}</h1>')
-        if slide.subtitle:
-            parts.append(f'  <p class="title-sub">{_esc(slide.subtitle)}</p>')
-        if slide.date_text:
-            parts.append(f'  <p class="title-date">{_esc(slide.date_text)}</p>')
-        parts.append(f'  <p class="title-footer">{_esc(slide.footer_text)}</p>')
-
-    elif layout == "section_divider":
-        if slide.section_number is not None:
-            parts.append(f'  <p class="section-num">Section {slide.section_number}</p>')
-        parts.append(f'  <h2 class="section-title">{_esc(slide.section_title)}</h2>')
-        if slide.big_idea:
-            parts.append(f'  <p class="section-idea">{_esc(slide.big_idea)}</p>')
-
-    elif layout == "three_pillar":
-        parts.append(f'  <h2 class="slide-title">{_esc(slide.title)}</h2>')
-        parts.append('  <div class="pillars">')
-        for pillar in slide.pillars:
-            parts.append(
-                '    <div class="pillar">'
-                f'<h3>{_esc(pillar.heading)}</h3>'
-                f'<p>{_esc(pillar.body)}</p>'
-                '</div>'
-            )
-        parts.append('  </div>')
-
-    elif layout == "bullet":
-        parts.append(f'  <h2 class="slide-title">{_esc(slide.title)}</h2>')
-        if slide.subtitle:
-            parts.append(f'  <p class="slide-sub">{_esc(slide.subtitle)}</p>')
-        parts.append('  <ul class="bullets">')
-        for bullet in slide.bullets:
-            parts.append(f'    <li>{_esc(bullet)}</li>')
-        parts.append('  </ul>')
-        for asset in slide.visual_assets:
-            parts.append(
-                '  <p class="visual-hint">'
-                f'<span class="visual-tag">[{_esc(asset.asset_type)}]</span> '
-                f'{_esc(asset.description)}'
-                '</p>'
-            )
-
-    elif layout == "team_bio":
-        parts.append(f'  <h2 class="slide-title">{_esc(slide.title)}</h2>')
-        parts.append('  <div class="team">')
-        for member in slide.members:
-            parts.append('    <div class="member">')
-            parts.append(f'      <h3>{_esc(member.name)}</h3>')
-            parts.append(f'      <p class="member-role">{_esc(member.role)}</p>')
-            if member.bio_one_liner:
-                parts.append(f'      <p>{_esc(member.bio_one_liner)}</p>')
-            if member.passion:
-                parts.append(
-                    f'      <p class="member-kv"><span>Passion:</span> {_esc(member.passion)}</p>'
-                )
-            if member.fact:
-                parts.append(
-                    f'      <p class="member-kv"><span>Fact:</span> {_esc(member.fact)}</p>'
-                )
-            parts.append('    </div>')
-        parts.append('  </div>')
-
-    elif layout == "data_point":
-        parts.append(f'  <p class="data-headline">{_esc(slide.headline)}</p>')
-        parts.append(
-            f'  <p class="data-framing">{_esc(slide.plain_english_framing)}</p>'
+        sub = f'<div class="sub">{_esc(slide.subtitle)}</div>' if slide.subtitle else ""
+        meta = f'<div class="meta">{_esc(slide.date_text)}</div>' if slide.date_text else ""
+        return (
+            f'<section class="slide blue t-title">'
+            f'{_chrome_top(label, True)}'
+            f'<div class="rule"></div>'
+            f'<h1>{_esc(slide.title)}</h1>'
+            f'{sub}{meta}'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
         )
-        parts.append('  <ul class="sources">')
-        for src in slide.sources:
-            label_text = src.title or str(src.url)
-            parts.append(
-                '    <li>'
-                f'<a href="{_esc(str(src.url))}">{_esc(label_text)}</a>'
-                f' <span class="reliability">reliability {src.reliability_score:.2f}</span>'
-                '</li>'
-            )
-        parts.append('  </ul>')
 
-    elif layout == "comparable_project":
-        parts.append(f'  <h2 class="slide-title">{_esc(slide.project_name)}</h2>')
+    if layout == "section_divider":
+        num = f"{slide.section_number:02d}" if slide.section_number is not None else "—"
+        idea = f'<div class="lead">{_esc(slide.big_idea)}</div>' if slide.big_idea else ""
+        return (
+            f'<section class="slide blue t-section">'
+            f'{_chrome_top(label, True)}'
+            f'<div class="num">{num} / {_esc(slide.section_title.upper())}</div>'
+            f'<h1>{_esc(slide.section_title)}</h1>'
+            f'<div class="rule"></div>'
+            f'{idea}'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    if layout == "three_pillar":
+        cards = "".join(
+            f'<div class="card"><div class="num">{i + 1:02d}</div>'
+            f'<h3>{_esc(p.heading)}</h3><p>{_esc(p.body)}</p></div>'
+            for i, p in enumerate(slide.pillars)
+        )
+        return (
+            f'<section class="slide sky-tint t-pillars">'
+            f'{_chrome_top(label, False)}'
+            f'<div class="head"><h2>{_esc(slide.title)}</h2></div>'
+            f'<div class="grid">{cards}</div>'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    if layout == "bullet":
+        sub = f'<div class="lead">{_esc(slide.subtitle)}</div>' if slide.subtitle else ""
+        bullets = "".join(f'<li>{_esc(b)}</li>' for b in slide.bullets)
+        assets = "".join(
+            f'<p class="visual-hint"><span class="visual-tag">[{_esc(a.asset_type)}]</span> '
+            f'{_esc(a.description)}</p>'
+            for a in getattr(slide, "visual_assets", []) or []
+        )
+        return (
+            f'<section class="slide t-bullet">'
+            f'{_chrome_top(label, False)}'
+            f'<div class="lhs"><h2>{_esc(slide.title)}</h2>{sub}</div>'
+            f'<div class="rhs"><ul class="bullets">{bullets}</ul>{assets}</div>'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    if layout == "team_bio":
+        members = "".join(
+            (
+                '<div class="member">'
+                f'<h3>{_esc(m.name)}</h3>'
+                f'<div class="role">{_esc(m.role)}</div>'
+                + (f'<p>{_esc(m.bio_one_liner)}</p>' if m.bio_one_liner else "")
+                + (
+                    f'<p class="kv"><span class="kv-label">Passion</span>{_esc(m.passion)}</p>'
+                    if m.passion else ""
+                )
+                + (
+                    f'<p class="kv"><span class="kv-label">Fact</span>{_esc(m.fact)}</p>'
+                    if m.fact else ""
+                )
+                + '</div>'
+            )
+            for m in slide.members
+        )
+        return (
+            f'<section class="slide t-team">'
+            f'{_chrome_top(label, False)}'
+            f'<div class="head"><h2>{_esc(slide.title)}</h2></div>'
+            f'<div class="grid">{members}</div>'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    if layout == "data_point":
+        sources = "".join(
+            f'<li><a href="{_esc(str(src.url))}">{_esc(src.title or str(src.url))}</a>'
+            f'<span class="reliability">r {src.reliability_score:.2f}</span></li>'
+            for src in slide.sources
+        )
+        return (
+            f'<section class="slide t-data">'
+            f'{_chrome_top(label, False)}'
+            f'<div class="fig">{_esc(slide.headline)}</div>'
+            f'<p class="framing">{_esc(slide.plain_english_framing)}</p>'
+            f'<ul class="sources">{sources}</ul>'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    if layout == "comparable_project":
         meta = f"{_esc(slide.municipality)} · {slide.year}"
         if slide.cost_usd:
             meta += f" · ${slide.cost_usd:,}"
-        parts.append(f'  <p class="comparable-meta">{meta}</p>')
-        parts.append(
-            f'  <p class="comparable-outcome"><strong>Outcome:</strong> {_esc(slide.outcome)}</p>'
-        )
-        parts.append(
-            f'  <p class="comparable-why"><strong>Why relevant:</strong> {_esc(slide.why_relevant)}</p>'
-        )
-
-    elif layout == "quote":
-        parts.append(f'  <blockquote class="pull-quote">{_esc(slide.quote)}</blockquote>')
-        parts.append(f'  <p class="attribution">— {_esc(slide.attribution)}</p>')
-        if slide.context:
-            parts.append(f'  <p class="quote-context">{_esc(slide.context)}</p>')
-
-    elif layout == "closing":
-        parts.append(f'  <p class="closing-cta">{_esc(slide.call_to_action)}</p>')
-        if slide.leave_behind_summary:
-            parts.append(f'  <p class="closing-leave">{_esc(slide.leave_behind_summary)}</p>')
-        parts.append(f'  <p class="closing-contact">{_esc(slide.contact_line)}</p>')
-
-    if slide.speaker_notes:
-        parts.append(
-            '  <details class="speaker-notes">'
-            '<summary>Speaker notes</summary>'
-            f'<p>{_esc(slide.speaker_notes)}</p>'
-            '</details>'
+        return (
+            f'<section class="slide t-comparable">'
+            f'{_chrome_top(label, False)}'
+            f'<div class="head">'
+            f'<div class="eyebrow">Florida Precedent</div>'
+            f'<h2>{_esc(slide.project_name)}</h2>'
+            f'<div class="meta">{meta}</div>'
+            f'</div>'
+            f'<div class="body">'
+            f'<p><span class="kv-label">Outcome</span> {_esc(slide.outcome)}</p>'
+            f'<p><span class="kv-label">Why this matters</span> {_esc(slide.why_relevant)}</p>'
+            f'</div>'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
         )
 
-    parts.append('</section>')
-    return "\n".join(parts)
+    if layout == "quote":
+        context = f'<div class="context">{_esc(slide.context)}</div>' if slide.context else ""
+        return (
+            f'<section class="slide t-quote">'
+            f'{_chrome_top(label, False)}'
+            f'<blockquote class="quote">{_esc(slide.quote)}</blockquote>'
+            f'<div class="attribution">— {_esc(slide.attribution)}</div>'
+            f'{context}'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    if layout == "closing":
+        leave = (
+            f'<p class="leave">{_esc(slide.leave_behind_summary)}</p>'
+            if slide.leave_behind_summary else ""
+        )
+        return (
+            f'<section class="slide blue t-close">'
+            f'{_chrome_top(label, True)}'
+            f'<div class="rule"></div>'
+            f'<h1>{_esc(slide.call_to_action)}</h1>'
+            f'{leave}'
+            f'<div class="sig">{_esc(slide.contact_line)}</div>'
+            f'{_chrome_bot(n, total)}'
+            f'{_speaker_notes(slide)}'
+            f'</section>'
+        )
+
+    # Unknown layout — render a minimal fallback so the deck still produces.
+    return (
+        f'<section class="slide t-bullet">'
+        f'{_chrome_top(label, False)}'
+        f'<div class="lhs"><h2>{_esc(layout)}</h2></div>'
+        f'{_chrome_bot(n, total)}'
+        f'{_speaker_notes(slide)}'
+        f'</section>'
+    )
 
 
 _HTML_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&family=Open+Sans:wght@400;600&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700;800;900&family=Source+Sans+3:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Source+Code+Pro:wght@400;500;600&display=swap');
 
+/* ============================================================
+   C-HAWQ Design System — verbatim tokens from colors_and_type.css
+   ============================================================ */
 :root {
-  --main-blue: #1f396d;
-  --green: #3f886c;
-  --sky: #48c5e3;
-  --ink: #141f36;
-  --subtle: #556688;
-  --warning: #c84a3a;
-  --bg: #f4f6fa;
-  --paper: #ffffff;
+  --chawq-main-blue:       #1f396d;
+  --chawq-green:           #3f886c;
+  --chawq-sky:             #48c5e3;
+
+  --chawq-main-blue-900:   #142749;
+  --chawq-main-blue-800:   #1a3160;
+  --chawq-main-blue-700:   #1f396d;
+  --chawq-main-blue-600:   #2a4a86;
+  --chawq-main-blue-500:   #3a5ea0;
+  --chawq-main-blue-300:   #7a90bb;
+  --chawq-main-blue-100:   #d7dfee;
+  --chawq-main-blue-050:   #eef2f9;
+
+  --chawq-green-900:       #255241;
+  --chawq-green-700:       #3f886c;
+  --chawq-green-500:       #5ba988;
+  --chawq-green-100:       #deece5;
+  --chawq-green-050:       #eff6f2;
+
+  --chawq-sky-900:         #1d7c94;
+  --chawq-sky-700:         #2aa3c2;
+  --chawq-sky-500:         #48c5e3;
+  --chawq-sky-300:         #8edcee;
+  --chawq-sky-100:         #d0eff7;
+  --chawq-sky-050:         #ebf8fc;
+
+  --chawq-ink:             #0e1a33;
+  --chawq-fg-1:            #152545;
+  --chawq-fg-2:            #3c4a66;
+  --chawq-fg-3:            #65728c;
+  --chawq-fg-muted:        #8a94a9;
+  --chawq-line:            #d9dde6;
+  --chawq-line-soft:       #e8ebf1;
+  --chawq-surface-2:       #f2f4f8;
+  --chawq-surface-1:       #f7f8fb;
+  --chawq-paper:           #ffffff;
+
+  --chawq-on-blue-1:       #ffffff;
+  --chawq-on-blue-2:       #d7dfee;
+  --chawq-on-blue-3:       #9aaacb;
+
+  --font-display: 'Jost', 'Futura PT', 'Futura', 'Century Gothic', 'Avenir Next', sans-serif;
+  --font-body:    'Source Sans 3', 'Source Sans Pro', 'Open Sans', 'Inter', system-ui, sans-serif;
+  --font-mono:    'Source Code Pro', 'Roboto Mono', ui-monospace, Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
 
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
 body {
   margin: 0;
-  padding: 32px 16px;
-  background: var(--bg);
-  font-family: 'Open Sans', Arial, sans-serif;
-  color: var(--ink);
-  line-height: 1.5;
+  padding: 24px 0;
+  background: var(--chawq-surface-1);
+  font-family: var(--font-body);
+  color: var(--chawq-fg-1);
+  line-height: 1.55;
 }
 
-.deck-header {
-  max-width: 960px;
-  margin: 0 auto 24px;
-}
-
-.deck-brand-bar {
-  background: var(--main-blue);
-  color: #fff;
-  font-family: 'Poppins', Arial, sans-serif;
-  font-weight: 600;
-  font-size: 12px;
-  padding: 8px 16px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.deck-title {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-size: 32px;
-  margin: 16px 0 4px;
-}
-
-.deck-subtitle {
-  color: var(--subtle);
-  font-style: italic;
-  margin: 0 0 12px;
-}
-
-.deck-meta {
-  font-family: 'Roboto Mono', monospace;
-  font-size: 12px;
-  color: var(--subtle);
-  margin: 0 0 24px;
-}
-
-.deck-meta strong {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-weight: 600;
-}
-
-.slide {
-  position: relative;
-  max-width: 960px;
-  margin: 0 auto 24px;
-  aspect-ratio: 16 / 9;
-  background: var(--paper);
-  border-radius: 6px;
-  box-shadow: 0 2px 10px rgba(20, 31, 54, 0.08);
-  padding: 56px 64px 64px;
-  overflow: hidden;
-  page-break-after: always;
-}
-
-.slide-chrome {
-  position: absolute;
-  top: 16px;
-  right: 24px;
-  font-family: 'Roboto Mono', monospace;
-  font-size: 11px;
-  color: var(--subtle);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.slide-num {
-  background: var(--main-blue);
-  color: #fff;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-}
-
-.slide-tag {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.slide-title {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-size: 32px;
-  margin: 0 0 24px;
-  line-height: 1.2;
-}
-
-.slide-sub {
-  color: var(--subtle);
-  font-style: italic;
-  margin: -16px 0 24px;
-}
-
-/* Title slide */
-.slide--title {
-  background: linear-gradient(135deg, var(--main-blue) 0%, #2a4f8d 100%);
-  color: #fff;
+.deck {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-}
-.slide--title .slide-chrome { color: rgba(255,255,255,0.7); }
-.slide--title .slide-num { background: rgba(255,255,255,0.2); }
-.title-line {
-  font-family: 'Poppins', Arial, sans-serif;
-  font-size: 48px;
-  font-weight: 700;
-  margin: 0 0 16px;
-  line-height: 1.1;
-}
-.title-sub { font-size: 20px; opacity: 0.9; margin: 0 0 24px; }
-.title-date {
-  font-family: 'Roboto Mono', monospace;
-  font-size: 14px;
-  opacity: 0.8;
-  margin: 0;
-}
-.title-footer {
-  position: absolute;
-  bottom: 32px;
-  left: 64px;
-  right: 64px;
-  font-size: 11px;
-  font-family: 'Roboto Mono', monospace;
-  opacity: 0.6;
-  margin: 0;
-}
-
-/* Section divider */
-.slide--section_divider {
-  background: var(--main-blue);
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.slide--section_divider .slide-chrome { color: rgba(255,255,255,0.7); }
-.slide--section_divider .slide-num { background: rgba(255,255,255,0.2); }
-.section-num {
-  font-family: 'Roboto Mono', monospace;
-  font-size: 14px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  opacity: 0.7;
-  margin: 0 0 12px;
-}
-.section-title {
-  font-family: 'Poppins', Arial, sans-serif;
-  font-size: 42px;
-  font-weight: 700;
-  margin: 0 0 16px;
-  color: #fff;
-}
-.section-idea {
-  font-size: 18px;
-  max-width: 640px;
-  opacity: 0.9;
-  margin: 0;
-}
-
-/* Three pillars */
-.pillars {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  align-items: center;
   gap: 24px;
-  margin-top: 12px;
-}
-.pillar {
-  background: #f7f9fc;
-  border-top: 4px solid var(--sky);
-  border-radius: 4px;
-  padding: 20px;
-}
-.pillar h3 {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-size: 16px;
-  margin: 0 0 12px;
-}
-.pillar p { font-size: 14px; margin: 0; color: var(--ink); }
-
-/* Bullets */
-.bullets {
-  margin: 0;
-  padding-left: 24px;
-  font-size: 18px;
-}
-.bullets li { margin-bottom: 10px; }
-.visual-hint {
-  font-size: 12px;
-  color: var(--subtle);
-  font-style: italic;
-  margin-top: 16px;
-}
-.visual-tag {
-  font-family: 'Roboto Mono', monospace;
-  color: var(--sky);
-  font-style: normal;
 }
 
-/* Team */
-.team {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 20px;
+/* ============================================================
+   Slide base — verbatim from slide-templates.css (1920×1080)
+   ============================================================ */
+.slide {
+  width: 1920px;
+  height: 1080px;
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-body);
+  color: var(--chawq-fg-1);
+  background: #fff;
+  box-shadow: 0 18px 40px -10px rgba(20, 39, 73, 0.22);
 }
-.member {
-  background: #f7f9fc;
-  border-radius: 4px;
-  padding: 16px;
-}
-.member h3 {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-size: 16px;
-  margin: 0 0 4px;
-}
-.member-role {
-  color: var(--subtle);
-  font-size: 13px;
-  margin: 0 0 10px;
-}
-.member-kv { font-size: 13px; margin: 4px 0; }
-.member-kv span {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-weight: 600;
-}
+.slide.blue { background: var(--chawq-main-blue); color: #fff; }
+.slide.blue h1, .slide.blue h2, .slide.blue h3 { color: #fff; }
+.slide.blue .eyebrow { color: var(--chawq-sky); }
+.slide.sky-tint { background: linear-gradient(180deg, var(--chawq-sky-050) 0%, #fff 100%); }
 
-/* Data point */
-.data-headline {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-size: 40px;
-  font-weight: 700;
-  margin: 24px 0 16px;
-  line-height: 1.15;
+/* Shared chrome */
+.chrome-top {
+  position: absolute; top: 60px; left: 96px; right: 96px;
+  display: flex; justify-content: space-between; align-items: center;
 }
-.data-framing {
-  font-size: 18px;
-  margin: 0 0 24px;
-  max-width: 720px;
+.chrome-top .brand { display: flex; align-items: center; gap: 14px; }
+.chrome-top .brand img { width: 56px; height: 56px; object-fit: contain; }
+.chrome-top .brand .wm {
+  font-family: var(--font-display); font-weight: 800;
+  font-size: 24px; letter-spacing: 0.02em; color: #fff;
 }
-.sources {
-  margin-top: 24px;
-  padding-left: 20px;
-  font-size: 12px;
-  color: var(--subtle);
+.chrome-top .eyebrow {
+  font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--chawq-sky-900);
 }
-.sources a { color: var(--main-blue); text-decoration: none; }
-.sources a:hover { text-decoration: underline; }
-.reliability {
-  font-family: 'Roboto Mono', monospace;
-  margin-left: 6px;
+.slide.blue .chrome-top .eyebrow { color: var(--chawq-sky); }
+.chrome-bot {
+  position: absolute; bottom: 56px; left: 96px; right: 96px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--font-mono); font-size: 16px; color: var(--chawq-fg-muted);
 }
+.slide.blue .chrome-bot { color: var(--chawq-on-blue-3); }
+.chrome-bot .page { color: inherit; }
 
-/* Comparable project */
-.comparable-meta {
-  font-family: 'Roboto Mono', monospace;
-  color: var(--subtle);
-  margin: 0 0 20px;
-}
-.comparable-outcome, .comparable-why {
-  font-size: 16px;
-  margin: 0 0 12px;
-  max-width: 720px;
-}
+/* ---------- t-title (kit) ---------- */
+.t-title { display: flex; flex-direction: column; justify-content: flex-end; padding: 140px 120px 200px; }
+.t-title .rule { height: 6px; width: 120px; background: var(--chawq-sky); margin-bottom: 40px; }
+.t-title h1 { font-family: var(--font-display); font-size: 120px; line-height: 0.94; font-weight: 900; letter-spacing: -0.015em; margin: 0 0 28px; max-width: 1500px; color: #fff; }
+.t-title .sub { font-family: var(--font-body); font-size: 32px; color: var(--chawq-on-blue-2); max-width: 1200px; line-height: 1.35; }
+.t-title .meta { font-family: var(--font-mono); font-size: 20px; color: var(--chawq-sky); margin-top: 60px; letter-spacing: 0.04em; }
 
-/* Quote */
-.slide--quote { display: flex; flex-direction: column; justify-content: center; }
-.pull-quote {
-  font-family: 'Poppins', Arial, sans-serif;
-  font-size: 28px;
-  font-style: italic;
-  color: var(--main-blue);
-  border-left: 4px solid var(--sky);
-  padding-left: 20px;
-  margin: 0 0 16px;
-  line-height: 1.3;
-}
-.attribution {
-  font-size: 14px;
-  color: var(--subtle);
-  margin: 0 0 4px;
-}
-.quote-context {
-  font-size: 12px;
-  color: var(--subtle);
-  font-style: italic;
-  margin: 0;
-}
+/* ---------- t-section (kit) ---------- */
+.t-section { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 0 160px; }
+.t-section .num { font-family: var(--font-mono); font-size: 24px; color: var(--chawq-sky); letter-spacing: 0.14em; margin-bottom: 28px; }
+.t-section h1 { font-family: var(--font-display); font-size: 180px; line-height: 0.92; font-weight: 900; letter-spacing: -0.02em; margin: 0; max-width: 1500px; color: #fff; }
+.t-section .rule { height: 4px; width: 180px; background: var(--chawq-sky); margin-top: 56px; }
+.t-section .lead { font-family: var(--font-body); font-size: 28px; color: var(--chawq-on-blue-2); max-width: 1200px; line-height: 1.4; margin-top: 32px; }
 
-/* Closing */
-.slide--closing {
-  background: linear-gradient(135deg, #3f886c 0%, #2f6c54 100%);
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.slide--closing .slide-chrome { color: rgba(255,255,255,0.7); }
-.slide--closing .slide-num { background: rgba(255,255,255,0.2); }
-.closing-cta {
-  font-family: 'Poppins', Arial, sans-serif;
-  font-size: 36px;
-  font-weight: 700;
-  margin: 0 0 24px;
-  line-height: 1.2;
-}
-.closing-leave {
-  font-size: 18px;
-  max-width: 720px;
-  margin: 0 0 32px;
-  opacity: 0.95;
-}
-.closing-contact {
-  font-family: 'Roboto Mono', monospace;
-  font-size: 14px;
-  opacity: 0.85;
-  margin: 0;
-}
+/* ---------- t-pillars (kit) ---------- */
+.t-pillars { padding: 170px 96px 140px; }
+.t-pillars .head { margin-bottom: 64px; }
+.t-pillars h2 { font-family: var(--font-display); font-size: 72px; line-height: 1.02; margin: 0; font-weight: 800; color: var(--chawq-main-blue); max-width: 1500px; }
+.t-pillars .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
+.t-pillars .card { border: 1.5px solid var(--chawq-line); border-radius: 18px; padding: 48px 44px; background: #fff; }
+.t-pillars .card .num { font-family: var(--font-mono); font-size: 16px; color: var(--chawq-sky-900); font-weight: 600; letter-spacing: 0.08em; margin-bottom: 20px; }
+.t-pillars .card h3 { font-family: var(--font-display); font-size: 36px; line-height: 1.1; margin: 0 0 18px; font-weight: 800; color: var(--chawq-main-blue); }
+.t-pillars .card p { font-size: 22px; line-height: 1.5; color: var(--chawq-fg-2); margin: 0; }
 
-/* Speaker notes — collapsed by default */
+/* ---------- t-close (kit) ---------- */
+.t-close { padding: 0 160px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.t-close .rule { height: 6px; width: 120px; background: var(--chawq-sky); margin-bottom: 40px; }
+.t-close h1 { font-family: var(--font-display); font-size: 96px; line-height: 1; font-weight: 900; margin: 0 0 40px; color: #fff; max-width: 1500px; }
+.t-close .leave { font-family: var(--font-body); font-size: 28px; color: var(--chawq-on-blue-2); max-width: 1200px; line-height: 1.4; margin: 0 0 56px; }
+.t-close .sig { font-family: var(--font-mono); font-size: 22px; color: var(--chawq-sky); letter-spacing: 0.04em; }
+
+/* ============================================================
+   Extension templates — for schema layouts the kit doesn't ship
+   ============================================================ */
+
+/* ---------- t-bullet (headline left, bullets right) ---------- */
+.t-bullet { padding: 170px 120px 140px; display: grid; grid-template-columns: 1fr 1fr; gap: 100px; align-content: start; }
+.t-bullet .lhs h2 { font-family: var(--font-display); font-size: 76px; line-height: 1.02; margin: 0; font-weight: 800; color: var(--chawq-main-blue); max-width: 820px; }
+.t-bullet .lhs .lead { font-size: 24px; color: var(--chawq-fg-2); margin-top: 24px; max-width: 700px; line-height: 1.45; }
+.t-bullet .rhs ul.bullets { margin: 0; padding-left: 32px; font-size: 28px; line-height: 1.45; color: var(--chawq-fg-2); }
+.t-bullet .rhs ul.bullets li { margin-bottom: 22px; }
+.t-bullet .rhs ul.bullets li::marker { color: var(--chawq-sky); font-weight: 700; }
+.t-bullet .visual-hint { font-family: var(--font-mono); font-size: 14px; color: var(--chawq-fg-muted); font-style: italic; margin-top: 32px; }
+.t-bullet .visual-tag { font-family: var(--font-mono); color: var(--chawq-sky-900); font-style: normal; margin-right: 6px; }
+
+/* ---------- t-team (grid of member cards) ---------- */
+.t-team { padding: 170px 96px 140px; }
+.t-team .head { margin-bottom: 56px; }
+.t-team h2 { font-family: var(--font-display); font-size: 72px; line-height: 1.02; margin: 0; font-weight: 800; color: var(--chawq-main-blue); }
+.t-team .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+.t-team .member { border: 1.5px solid var(--chawq-line); border-radius: 14px; padding: 36px 32px; background: #fff; }
+.t-team .member h3 { font-family: var(--font-display); font-size: 30px; line-height: 1.1; margin: 0 0 6px; font-weight: 800; color: var(--chawq-main-blue); }
+.t-team .member .role { font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--chawq-sky-900); margin-bottom: 18px; }
+.t-team .member p { font-size: 18px; line-height: 1.5; color: var(--chawq-fg-2); margin: 0 0 10px; }
+.t-team .member .kv-label { font-family: var(--font-display); font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--chawq-sky-900); display: block; margin-bottom: 4px; }
+
+/* ---------- t-data (single big stat + sources) ---------- */
+.t-data { padding: 170px 120px 140px; display: flex; flex-direction: column; justify-content: center; }
+.t-data .fig { font-family: var(--font-display); font-weight: 900; font-size: 120px; line-height: 1; letter-spacing: -0.02em; color: var(--chawq-main-blue); margin: 0 0 40px; max-width: 1600px; }
+.t-data .framing { font-family: var(--font-body); font-size: 32px; line-height: 1.4; color: var(--chawq-fg-2); margin: 0 0 56px; max-width: 1400px; }
+.t-data ul.sources { list-style: none; margin: 0; padding: 0; }
+.t-data ul.sources li { font-family: var(--font-mono); font-size: 16px; color: var(--chawq-fg-3); padding: 8px 0; border-top: 1px solid var(--chawq-line); display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.t-data ul.sources a { color: var(--chawq-main-blue-600); text-decoration: none; }
+.t-data ul.sources .reliability { font-family: var(--font-mono); color: var(--chawq-sky-900); }
+
+/* ---------- t-comparable (Florida precedent card) ---------- */
+.t-comparable { padding: 170px 120px 140px; display: grid; grid-template-rows: auto 1fr; gap: 56px; }
+.t-comparable .head .eyebrow { font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--chawq-sky-900); margin-bottom: 18px; }
+.t-comparable h2 { font-family: var(--font-display); font-size: 76px; line-height: 1; margin: 0; font-weight: 800; color: var(--chawq-main-blue); max-width: 1500px; }
+.t-comparable .head .meta { font-family: var(--font-mono); font-size: 22px; color: var(--chawq-fg-3); letter-spacing: 0.04em; margin-top: 24px; }
+.t-comparable .body p { font-size: 28px; line-height: 1.45; color: var(--chawq-fg-2); margin: 0 0 28px; max-width: 1500px; }
+.t-comparable .body .kv-label { font-family: var(--font-display); font-size: 14px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--chawq-sky-900); display: block; margin-bottom: 8px; }
+
+/* ---------- t-quote (large pull quote) ---------- */
+.t-quote { padding: 0 160px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.t-quote .quote { font-family: var(--font-display); font-weight: 700; font-size: 64px; line-height: 1.15; color: var(--chawq-main-blue); border-left: 6px solid var(--chawq-sky); padding-left: 48px; margin: 0 0 48px; max-width: 1500px; }
+.t-quote .attribution { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: 0.04em; color: var(--chawq-fg-2); margin-bottom: 12px; }
+.t-quote .context { font-family: var(--font-mono); font-size: 18px; color: var(--chawq-fg-muted); }
+
+/* ============================================================
+   Speaker notes — visible on screen, hidden in print
+   ============================================================ */
 .speaker-notes {
-  margin-top: 20px;
-  font-size: 12px;
-  color: var(--subtle);
+  width: 1920px; margin: 0 auto;
+  padding: 16px 96px;
+  background: var(--chawq-surface-2);
+  border-top: 1px solid var(--chawq-line);
+  font-size: 18px;
+  color: var(--chawq-fg-2);
 }
 .speaker-notes summary {
-  cursor: pointer;
-  font-family: 'Poppins', Arial, sans-serif;
-  font-weight: 600;
-  color: var(--main-blue);
+  cursor: pointer; font-family: var(--font-display); font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--chawq-main-blue); font-size: 14px;
 }
 .speaker-notes p {
-  margin: 8px 0 0;
-  padding-left: 12px;
-  border-left: 2px solid var(--sky);
+  margin: 12px 0 0; padding-left: 16px;
+  border-left: 3px solid var(--chawq-sky);
   font-style: italic;
 }
 
-/* Appendix — operational extras (kickoff cadence, risks, next step) */
+/* ============================================================
+   Appendix (cadence / risks / next step) — paper card after deck
+   ============================================================ */
 .appendix {
-  max-width: 960px;
-  margin: 24px auto 0;
-  padding: 0 16px;
+  width: 1920px; margin: 24px auto 0; padding: 56px 96px;
+  background: var(--chawq-paper);
+  border-top: 6px solid var(--chawq-green);
 }
-.appendix-block {
-  background: var(--paper);
-  border-left: 4px solid var(--green);
-  border-radius: 4px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 4px rgba(20, 31, 54, 0.04);
-}
+.appendix-block { margin-bottom: 40px; }
 .appendix-block h2 {
-  font-family: 'Poppins', Arial, sans-serif;
-  color: var(--main-blue);
-  font-size: 18px;
-  margin: 0 0 8px;
+  font-family: var(--font-display); font-weight: 800;
+  font-size: 32px; color: var(--chawq-main-blue); margin: 0 0 16px;
 }
 .appendix-block p, .appendix-block li {
-  font-size: 14px;
-  margin: 4px 0;
+  font-family: var(--font-body); font-size: 22px; line-height: 1.55;
+  color: var(--chawq-fg-2); margin: 6px 0;
 }
 
+/* ============================================================
+   Print — one slide per page at native 1920×1080
+   ============================================================ */
+@page { size: 1920px 1080px; margin: 0; }
 @media print {
   body { background: #fff; padding: 0; }
-  .deck-header { padding: 0 24px; }
-  .slide { box-shadow: none; margin: 0; border-radius: 0; }
+  .deck { gap: 0; }
+  .slide { box-shadow: none; page-break-after: always; break-after: page; }
   .speaker-notes { display: none; }
   .appendix { page-break-before: always; }
 }
@@ -809,8 +755,9 @@ def render_html(outline: PresentationOutline) -> bytes:
     16:9 styled section. Speaker notes collapse into a <details> per slide.
     """
     f = outline.findings
+    total = len(f.slides)
 
-    slides_html = "\n".join(_slide_html(s) for s in f.slides)
+    slides_html = "\n".join(_slide_html(s, total) for s in f.slides)
 
     head = (
         '<!DOCTYPE html>\n'
@@ -823,27 +770,6 @@ def render_html(outline: PresentationOutline) -> bytes:
         '</head>\n'
         '<body>\n'
     )
-
-    confidence_pct = int(round(outline.overall_confidence * 100))
-    meta_bits = [
-        f'<strong>Outline:</strong> {_esc(outline.outline_type_id)} v{outline.prompt_version}',
-        f'<strong>Run:</strong> {_esc(outline.run_id[:8])}',
-        f'<strong>Slides:</strong> {len(f.slides)}',
-        f'<strong>Confidence:</strong> {confidence_pct}%',
-    ]
-    if outline.generated_at:
-        meta_bits.append(
-            f'<strong>Generated:</strong> {outline.generated_at.strftime("%B %d, %Y")}'
-        )
-
-    header = (
-        '<header class="deck-header">\n'
-        '  <div class="deck-brand-bar">C-HAWQ — Coastal Habitat and Water Quality Initiative</div>\n'
-        f'  <h1 class="deck-title">{_esc(f.deck_title)}</h1>\n'
-    )
-    if f.deck_subtitle:
-        header += f'  <p class="deck-subtitle">{_esc(f.deck_subtitle)}</p>\n'
-    header += f'  <p class="deck-meta">{"   ·   ".join(meta_bits)}</p>\n</header>\n'
 
     body = '<main class="deck">\n' + slides_html + '\n</main>\n'
 
@@ -881,7 +807,7 @@ def render_html(outline: PresentationOutline) -> bytes:
 
     foot = '</body>\n</html>\n'
 
-    return (head + header + body + appendix + foot).encode("utf-8")
+    return (head + body + appendix + foot).encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
