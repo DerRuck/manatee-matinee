@@ -131,7 +131,7 @@ def _render_slide_card(doc: Any, slide: Any) -> None:
 
     elif layout == "team_bio":
         for member in slide.members:
-            doc.add_heading(f"{member.name} — {member.role}", level=3)
+            doc.add_heading(f"{member.name}, {member.role}", level=3)
             if member.bio_one_liner:
                 doc.add_paragraph(member.bio_one_liner)
             _add_kv(doc, "Passion", member.passion)
@@ -212,7 +212,7 @@ def render_docx(outline: PresentationOutline) -> bytes:
             if ref.run_id:
                 line += f" (run {ref.run_id[:8]})"
             if ref.summary:
-                line += f" — {ref.summary}"
+                line += f": {ref.summary}"
             doc.add_paragraph(line, style="List Bullet")
 
     doc.add_heading("Slides", level=1)
@@ -267,9 +267,22 @@ def _load_logo_data_url(filename: str, mime: str) -> str:
 
 
 # Loaded once at import. Light-on-blue mark for dark slides; full-color symbol
-# for light slides.
+# for light slides. Embedded once in CSS (background-image) so 8 slides don't
+# duplicate ~50KB of base64 data 8 times.
 _LOGO_ON_BLUE = _load_logo_data_url("logo-secondary-symbol-cropped.png", "image/png")
 _LOGO_ON_WHITE = _load_logo_data_url("logo-primary-symbol.jpg", "image/jpeg")
+
+
+def _load_image_data_url(filename: str, mime: str = "image/jpeg") -> str:
+    """Embed a stock photo as a base64 data URL for self-contained decks."""
+    path = _BRANDING_ASSETS / "images" / filename
+    if not path.exists():
+        return ""
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
+# Cinematic coastal hero used as a darkened backdrop on title + closing slides.
+_HERO_PHOTO = _load_image_data_url("hero-mangroves.jpg", "image/jpeg")
 
 
 _HTML_LAYOUT_LABELS = {
@@ -285,18 +298,37 @@ _HTML_LAYOUT_LABELS = {
 }
 
 
+# C-HAWQ brand voice: zero em/en dashes. The agent loves them as default
+# pauses; we strip them at render time so the rule is enforced even if a
+# prompt drifts. Replace with comma+space, which preserves rhythm without
+# the visual weight.
+_DASH_REPLACEMENTS = (
+    (" — ", ", "),
+    (" – ", ", "),
+    ("—", ", "),
+    ("–", ", "),
+)
+
+
+def _strip_dashes(text: str) -> str:
+    for old, new in _DASH_REPLACEMENTS:
+        text = text.replace(old, new)
+    return text
+
+
 def _esc(value: Any) -> str:
-    return html_lib.escape("" if value is None else str(value), quote=True)
+    text = "" if value is None else str(value)
+    text = _strip_dashes(text)
+    return html_lib.escape(text, quote=True)
 
 
 def _chrome_top(label: str, on_blue: bool) -> str:
     """Top-left logo + top-right eyebrow band on every slide."""
-    logo = _LOGO_ON_BLUE if on_blue else _LOGO_ON_WHITE
-    wm_style = "" if on_blue else ' style="color:var(--chawq-main-blue)"'
+    logo_class = "brand-logo--blue" if on_blue else "brand-logo--white"
     return (
         '<div class="chrome-top">'
-        f'<div class="brand"><img src="{logo}" alt="C-HAWQ" />'
-        f'<span class="wm"{wm_style}>C-HAWQ</span></div>'
+        f'<div class="brand"><div class="brand-logo {logo_class}"></div>'
+        '<span class="wm">C-HAWQ</span></div>'
         f'<div class="eyebrow">{_esc(label)}</div>'
         '</div>'
     )
@@ -323,39 +355,59 @@ def _speaker_notes(slide: Any) -> str:
     )
 
 
+def _wrap_slide(inner_html: str, notes_html: str) -> str:
+    """Wrap a slide so it can scale-to-viewport and keep speaker-notes in flow.
+
+    Screen view: .slide-frame holds aspect-ratio; .slide inside is fixed at
+    1920x1080 and CSS-scaled down. Speaker notes sit OUTSIDE the frame so
+    they aren't clipped by overflow:hidden.
+
+    Print: scaling is disabled (@media print) so each slide prints at
+    native 1920x1080 with one slide per page.
+    """
+    return (
+        '<div class="slide-wrap">'
+        f'<div class="slide-frame">{inner_html}</div>'
+        f'{notes_html}'
+        '</div>'
+    )
+
+
 def _slide_html(slide: Any, total: int) -> str:
     layout = slide.layout
     label = _HTML_LAYOUT_LABELS.get(layout, layout)
     n = slide.slide_number
+    notes = _speaker_notes(slide)
 
     if layout == "title":
         sub = f'<div class="sub">{_esc(slide.subtitle)}</div>' if slide.subtitle else ""
         meta = f'<div class="meta">{_esc(slide.date_text)}</div>' if slide.date_text else ""
-        return (
+        inner = (
             f'<section class="slide blue t-title">'
             f'{_chrome_top(label, True)}'
             f'<div class="rule"></div>'
             f'<h1>{_esc(slide.title)}</h1>'
             f'{sub}{meta}'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "section_divider":
-        num = f"{slide.section_number:02d}" if slide.section_number is not None else "—"
+        num = f"{slide.section_number:02d}" if slide.section_number is not None else ""
+        num_html = f'<div class="num">{num} / {_esc(slide.section_title.upper())}</div>' if num else ""
         idea = f'<div class="lead">{_esc(slide.big_idea)}</div>' if slide.big_idea else ""
-        return (
+        inner = (
             f'<section class="slide blue t-section">'
             f'{_chrome_top(label, True)}'
-            f'<div class="num">{num} / {_esc(slide.section_title.upper())}</div>'
+            f'{num_html}'
             f'<h1>{_esc(slide.section_title)}</h1>'
             f'<div class="rule"></div>'
             f'{idea}'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "three_pillar":
         cards = "".join(
@@ -363,15 +415,15 @@ def _slide_html(slide: Any, total: int) -> str:
             f'<h3>{_esc(p.heading)}</h3><p>{_esc(p.body)}</p></div>'
             for i, p in enumerate(slide.pillars)
         )
-        return (
+        inner = (
             f'<section class="slide sky-tint t-pillars">'
             f'{_chrome_top(label, False)}'
             f'<div class="head"><h2>{_esc(slide.title)}</h2></div>'
             f'<div class="grid">{cards}</div>'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "bullet":
         sub = f'<div class="lead">{_esc(slide.subtitle)}</div>' if slide.subtitle else ""
@@ -381,15 +433,15 @@ def _slide_html(slide: Any, total: int) -> str:
             f'{_esc(a.description)}</p>'
             for a in getattr(slide, "visual_assets", []) or []
         )
-        return (
+        inner = (
             f'<section class="slide t-bullet">'
             f'{_chrome_top(label, False)}'
             f'<div class="lhs"><h2>{_esc(slide.title)}</h2>{sub}</div>'
             f'<div class="rhs"><ul class="bullets">{bullets}</ul>{assets}</div>'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "team_bio":
         members = "".join(
@@ -410,15 +462,15 @@ def _slide_html(slide: Any, total: int) -> str:
             )
             for m in slide.members
         )
-        return (
+        inner = (
             f'<section class="slide t-team">'
             f'{_chrome_top(label, False)}'
             f'<div class="head"><h2>{_esc(slide.title)}</h2></div>'
             f'<div class="grid">{members}</div>'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "data_point":
         sources = "".join(
@@ -426,22 +478,22 @@ def _slide_html(slide: Any, total: int) -> str:
             f'<span class="reliability">r {src.reliability_score:.2f}</span></li>'
             for src in slide.sources
         )
-        return (
+        inner = (
             f'<section class="slide t-data">'
             f'{_chrome_top(label, False)}'
             f'<div class="fig">{_esc(slide.headline)}</div>'
             f'<p class="framing">{_esc(slide.plain_english_framing)}</p>'
             f'<ul class="sources">{sources}</ul>'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "comparable_project":
         meta = f"{_esc(slide.municipality)} · {slide.year}"
         if slide.cost_usd:
             meta += f" · ${slide.cost_usd:,}"
-        return (
+        inner = (
             f'<section class="slide t-comparable">'
             f'{_chrome_top(label, False)}'
             f'<div class="head">'
@@ -454,29 +506,29 @@ def _slide_html(slide: Any, total: int) -> str:
             f'<p><span class="kv-label">Why this matters</span> {_esc(slide.why_relevant)}</p>'
             f'</div>'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "quote":
         context = f'<div class="context">{_esc(slide.context)}</div>' if slide.context else ""
-        return (
+        inner = (
             f'<section class="slide t-quote">'
             f'{_chrome_top(label, False)}'
             f'<blockquote class="quote">{_esc(slide.quote)}</blockquote>'
-            f'<div class="attribution">— {_esc(slide.attribution)}</div>'
+            f'<div class="attribution">{_esc(slide.attribution)}</div>'
             f'{context}'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
     if layout == "closing":
         leave = (
             f'<p class="leave">{_esc(slide.leave_behind_summary)}</p>'
             if slide.leave_behind_summary else ""
         )
-        return (
+        inner = (
             f'<section class="slide blue t-close">'
             f'{_chrome_top(label, True)}'
             f'<div class="rule"></div>'
@@ -484,26 +536,26 @@ def _slide_html(slide: Any, total: int) -> str:
             f'{leave}'
             f'<div class="sig">{_esc(slide.contact_line)}</div>'
             f'{_chrome_bot(n, total)}'
-            f'{_speaker_notes(slide)}'
             f'</section>'
         )
+        return _wrap_slide(inner, notes)
 
-    # Unknown layout — render a minimal fallback so the deck still produces.
-    return (
+    # Unknown layout: minimal fallback so the deck still produces.
+    inner = (
         f'<section class="slide t-bullet">'
         f'{_chrome_top(label, False)}'
         f'<div class="lhs"><h2>{_esc(layout)}</h2></div>'
         f'{_chrome_bot(n, total)}'
-        f'{_speaker_notes(slide)}'
         f'</section>'
     )
+    return _wrap_slide(inner, notes)
 
 
-_HTML_CSS = """
+_HTML_CSS_TEMPLATE = """
 @import url('https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700;800;900&family=Source+Sans+3:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Source+Code+Pro:wght@400;500;600&display=swap');
 
 /* ============================================================
-   C-HAWQ Design System — verbatim tokens from colors_and_type.css
+   C-HAWQ Design System: verbatim tokens from colors_and_type.css
    ============================================================ */
 :root {
   --chawq-main-blue:       #1f396d;
@@ -569,26 +621,60 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
+  gap: 32px;
+  width: 100%;
+  padding: 0 16px;
 }
 
 /* ============================================================
-   Slide base — verbatim from slide-templates.css (1920×1080)
+   Slide wrapper: scales 1920x1080 to fit any viewport on screen,
+   prints at native size with one slide per page.
+   ============================================================ */
+.slide-wrap { width: 100%; max-width: 1920px; }
+.slide-frame {
+  width: 100%;
+  aspect-ratio: 1920 / 1080;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 18px 40px -10px rgba(20, 39, 73, 0.22);
+  border-radius: 4px;
+}
+
+/* ============================================================
+   Slide base: verbatim from slide-templates.css (1920x1080)
+   The .slide sits absolutely inside .slide-frame and CSS-scales
+   down via transform so the visual stays pixel-precise.
    ============================================================ */
 .slide {
   width: 1920px;
   height: 1080px;
-  position: relative;
-  overflow: hidden;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  transform: scale(min(1, calc(100vw / 1920px)));  /* viewport-based fallback */
   font-family: var(--font-body);
   color: var(--chawq-fg-1);
   background: #fff;
-  box-shadow: 0 18px 40px -10px rgba(20, 39, 73, 0.22);
+  overflow: hidden;
+}
+/* Viewport-aware scale: width-of-frame / 1920 */
+@supports (container-type: inline-size) {
+  .slide-frame { container-type: inline-size; }
+  .slide { transform: scale(calc(100cqi / 1920px)); }
 }
 .slide.blue { background: var(--chawq-main-blue); color: #fff; }
 .slide.blue h1, .slide.blue h2, .slide.blue h3 { color: #fff; }
 .slide.blue .eyebrow { color: var(--chawq-sky); }
 .slide.sky-tint { background: linear-gradient(180deg, var(--chawq-sky-050) 0%, #fff 100%); }
+
+/* Global text wrap so long headlines never overflow */
+.slide h1, .slide h2, .slide h3 {
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
+}
 
 /* Shared chrome */
 .chrome-top {
@@ -596,11 +682,21 @@ body {
   display: flex; justify-content: space-between; align-items: center;
 }
 .chrome-top .brand { display: flex; align-items: center; gap: 14px; }
-.chrome-top .brand img { width: 56px; height: 56px; object-fit: contain; }
+.brand-logo {
+  width: 56px; height: 56px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  flex-shrink: 0;
+}
+.brand-logo--blue  { background-image: url('__LOGO_BLUE__'); }
+.brand-logo--white { background-image: url('__LOGO_WHITE__'); }
 .chrome-top .brand .wm {
   font-family: var(--font-display); font-weight: 800;
-  font-size: 24px; letter-spacing: 0.02em; color: #fff;
+  font-size: 24px; letter-spacing: 0.02em;
+  color: var(--chawq-main-blue);
 }
+.slide.blue .chrome-top .brand .wm { color: #fff; }
 .chrome-top .eyebrow {
   font-family: var(--font-display); font-size: 18px; font-weight: 700;
   letter-spacing: 0.14em; text-transform: uppercase;
@@ -615,11 +711,16 @@ body {
 .slide.blue .chrome-bot { color: var(--chawq-on-blue-3); }
 .chrome-bot .page { color: inherit; }
 
-/* ---------- t-title (kit) ---------- */
+/* ---------- t-title (kit + hero photo backdrop) ---------- */
 .t-title { display: flex; flex-direction: column; justify-content: flex-end; padding: 140px 120px 200px; }
+.slide.blue.t-title {
+  background:
+    linear-gradient(180deg, rgba(20, 39, 73, 0.72) 0%, rgba(20, 39, 73, 0.95) 100%),
+    url('__HERO__') center/cover no-repeat;
+}
 .t-title .rule { height: 6px; width: 120px; background: var(--chawq-sky); margin-bottom: 40px; }
-.t-title h1 { font-family: var(--font-display); font-size: 120px; line-height: 0.94; font-weight: 900; letter-spacing: -0.015em; margin: 0 0 28px; max-width: 1500px; color: #fff; }
-.t-title .sub { font-family: var(--font-body); font-size: 32px; color: var(--chawq-on-blue-2); max-width: 1200px; line-height: 1.35; }
+.t-title h1 { font-family: var(--font-display); font-size: 108px; line-height: 0.96; font-weight: 900; letter-spacing: -0.015em; margin: 0 0 28px; max-width: 1500px; color: #fff; }
+.t-title .sub { font-family: var(--font-body); font-size: 32px; color: var(--chawq-on-blue-2); max-width: 1300px; line-height: 1.35; }
 .t-title .meta { font-family: var(--font-mono); font-size: 20px; color: var(--chawq-sky); margin-top: 60px; letter-spacing: 0.04em; }
 
 /* ---------- t-section (kit) ---------- */
@@ -639,15 +740,28 @@ body {
 .t-pillars .card h3 { font-family: var(--font-display); font-size: 36px; line-height: 1.1; margin: 0 0 18px; font-weight: 800; color: var(--chawq-main-blue); }
 .t-pillars .card p { font-size: 22px; line-height: 1.5; color: var(--chawq-fg-2); margin: 0; }
 
-/* ---------- t-close (kit) ---------- */
-.t-close { padding: 0 160px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+/* ---------- t-close (kit + hero photo backdrop) ---------- */
+.t-close { padding: 100px 160px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.slide.blue.t-close {
+  background:
+    linear-gradient(180deg, rgba(20, 39, 73, 0.78) 0%, rgba(20, 39, 73, 0.96) 100%),
+    url('__HERO__') center/cover no-repeat;
+}
 .t-close .rule { height: 6px; width: 120px; background: var(--chawq-sky); margin-bottom: 40px; }
-.t-close h1 { font-family: var(--font-display); font-size: 96px; line-height: 1; font-weight: 900; margin: 0 0 40px; color: #fff; max-width: 1500px; }
-.t-close .leave { font-family: var(--font-body); font-size: 28px; color: var(--chawq-on-blue-2); max-width: 1200px; line-height: 1.4; margin: 0 0 56px; }
+.t-close h1 {
+  font-family: var(--font-display);
+  font-size: 56px;
+  line-height: 1.1;
+  font-weight: 800;
+  margin: 0 0 36px;
+  color: #fff;
+  max-width: 1500px;
+}
+.t-close .leave { font-family: var(--font-body); font-size: 26px; color: var(--chawq-on-blue-2); max-width: 1400px; line-height: 1.4; margin: 0 0 48px; }
 .t-close .sig { font-family: var(--font-mono); font-size: 22px; color: var(--chawq-sky); letter-spacing: 0.04em; }
 
 /* ============================================================
-   Extension templates — for schema layouts the kit doesn't ship
+   Extension templates: for schema layouts the kit doesn't ship
    ============================================================ */
 
 /* ---------- t-bullet (headline left, bullets right) ---------- */
@@ -695,7 +809,7 @@ body {
 .t-quote .context { font-family: var(--font-mono); font-size: 18px; color: var(--chawq-fg-muted); }
 
 /* ============================================================
-   Speaker notes — visible on screen, hidden in print
+   Speaker notes: visible on screen, hidden in print
    ============================================================ */
 .speaker-notes {
   width: 1920px; margin: 0 auto;
@@ -717,7 +831,7 @@ body {
 }
 
 /* ============================================================
-   Appendix (cadence / risks / next step) — paper card after deck
+   Appendix (cadence / risks / next step): paper card after deck
    ============================================================ */
 .appendix {
   width: 1920px; margin: 24px auto 0; padding: 56px 96px;
@@ -735,17 +849,37 @@ body {
 }
 
 /* ============================================================
-   Print — one slide per page at native 1920×1080
+   Print: one slide per page at native 1920x1080, no scaling
    ============================================================ */
 @page { size: 1920px 1080px; margin: 0; }
 @media print {
   body { background: #fff; padding: 0; }
-  .deck { gap: 0; }
-  .slide { box-shadow: none; page-break-after: always; break-after: page; }
+  .deck { gap: 0; padding: 0; }
+  .slide-wrap { width: 1920px; max-width: none; }
+  .slide-frame {
+    width: 1920px;
+    height: 1080px;
+    aspect-ratio: auto;
+    box-shadow: none;
+    border-radius: 0;
+    page-break-after: always;
+    break-after: page;
+  }
+  .slide { transform: none; position: relative; }
   .speaker-notes { display: none; }
   .appendix { page-break-before: always; }
 }
 """
+
+# Interpolate the base64 data URLs once at module load so the rendered HTML
+# contains the logos and hero photo embedded as CSS background-image,
+# rather than duplicating the image bytes inside <img src> on every slide.
+_HTML_CSS = (
+    _HTML_CSS_TEMPLATE
+    .replace("__LOGO_BLUE__", _LOGO_ON_BLUE)
+    .replace("__LOGO_WHITE__", _LOGO_ON_WHITE)
+    .replace("__HERO__", _HERO_PHOTO)
+)
 
 
 def render_html(outline: PresentationOutline) -> bytes:
