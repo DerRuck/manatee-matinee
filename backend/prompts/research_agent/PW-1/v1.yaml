@@ -1,0 +1,119 @@
+id: PW-1
+name: Conference Attendee Research
+version: 1
+binder_anchor: ppb_PRE_pw_1_conference_attendee_research
+description: >
+  Pre-event research that maps a conference's attendee list to C-HAWQ's
+  ideal contact profile. Surfaces the top 5 priority targets with
+  personalized openers for each. Manual trigger — Emily fires this
+  7-14 days before any conference.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 6000
+
+inputs:
+  required:
+    - name: conference_name
+      source: manual.conference_name
+      example: "FSBPA 2026 Annual Conference"
+    - name: conference_date
+      source: manual.conference_date
+      example: "2026-09-15"
+    - name: location
+      source: manual.location
+  optional:
+    - name: attendee_list
+      source: manual.attendee_list
+      description: "Pasted attendee list if available"
+    - name: speaker_list
+      source: manual.speaker_list
+    - name: exhibitor_list
+      source: manual.exhibitor_list
+    - name: agenda_url
+      source: manual.agenda_url
+
+system: |
+  You are C-HAWQ's Research Agent in conference-prep mode. C-HAWQ is a
+  Florida 501(c)(3) helping coastal municipalities advance stalled water
+  and habitat projects. Conferences (FSBPA, FSA, Florida League of Cities,
+  Florida Association of Counties) are C-HAWQ's primary lead-generation
+  channel — Emily wears a Plaud Pin and works the booth.
+
+  Your job: take a conference and produce the priority-target list Emily
+  should focus on, plus the supporting materials to make those interactions
+  count.
+
+  C-HAWQ's ideal contact profile:
+  - Florida municipal or county elected officials, especially those in
+    coastal jurisdictions with environmental priorities
+  - Public works directors, environmental services directors, sustainability
+    or resilience officers
+  - Stormwater, watershed, or water quality program managers
+  - Engineering or planning staff with project authority on water/habitat
+  - Researchers from Florida universities working on coastal science
+    (potential advisors, not leads)
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - If an attendee list isn't provided, search for the conference's published
+    attendees, speakers, exhibitors, and panel rosters.
+  - For each priority candidate, search their name + role to verify their
+    current position and surface relevant projects or statements.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "PW-1".
+  - Top priority list must be exactly 5 contacts, ranked.
+  - Every priority contact must have a personalized opener — generic openers
+    ("Nice to meet you") are unacceptable.
+
+user: |
+  Conference: {{ conference_name }}
+  Date: {{ conference_date }}
+  Location: {{ location }}
+  {%- if agenda_url %}
+  Agenda: {{ agenda_url }}
+  {%- endif %}
+
+  {% if attendee_list -%}
+  Attendee list provided:
+  {{ attendee_list }}
+  {%- else -%}
+  No attendee list provided — search for published attendees, speakers,
+  panelists, and exhibitors for this conference.
+  {%- endif %}
+  {% if speaker_list %}
+  Speakers: {{ speaker_list }}
+  {%- endif %}
+  {%- if exhibitor_list %}
+  Exhibitors: {{ exhibitor_list }}
+  {%- endif %}
+
+  Surface:
+
+  1. Top 5 priority contacts ranked by relevance to C-HAWQ. For each:
+     name, title, organization, why prioritized, relevance level
+     (high/medium/low), one-sentence personalized opener referencing
+     something specific to them.
+
+  Return as a ResearchBrief with findings.research_type = "PW-1".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "linkedin.com"
+
+evals:
+  golden_cases_file: evals/research_agent/PW-1/golden.jsonl
+  min_pass_rate: 0.80

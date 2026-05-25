@@ -1,0 +1,171 @@
+# Runtime prompt for the S6-1 Grant Opportunity Research type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S6-1) is reference-only.
+#
+# Path: prompts/research_agent/S6-1/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S6-1
+name: Grant Opportunity Research
+version: 1
+binder_anchor: ppb_S06_110_ai_prompt_grant_opportunity_research
+description: >
+  Identifies funding pathways for a qualified C-HAWQ project. Maps eligible
+  state, federal, and regional grants to project type, cost band, and P3
+  compatibility. Auto-fires when GHL stage transitions to Define (Step 6).
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 16000
+
+# ---- Input contract ---------------------------------------------------------
+# Resolved by the Context Assembler from the GHL contact record + project
+# intake form. Required fields fail the run if missing; optional fields fall
+# through to graceful template skipping.
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: county
+      source: ghl.contact.county
+      example: "Collier"
+    - name: project_type
+      source: ghl.contact.project_type
+      enum:
+        - seagrass_restoration
+        - stormwater_retrofit
+        - coastal_habitat
+        - canal_restoration
+        - water_quality_improvement
+    - name: estimated_cost_usd
+      source: ghl.contact.estimated_cost_usd
+      example: 4400000
+  optional:
+    - name: project_overview
+      source: ghl.contact.project_overview
+    - name: p3_intent
+      source: ghl.contact.p3_intent
+    - name: timeline
+      source: ghl.contact.target_start
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent. C-HAWQ is a Florida 501(c)(3) that helps
+  coastal municipalities move stalled water and habitat projects forward by
+  bridging funding, science, and execution. Your job is to identify the
+  highest-leverage funding pathways for one qualified project.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM. Default to fetching
+    fresh data over relying on training-data knowledge.
+  - For each grant program you propose, you should have either: (a) fetched
+    the program's official page within this turn, or (b) explicitly noted
+    in the brief that you couldn't access the live page and confidence is
+    therefore capped below 0.7.
+  - Use web_search to discover candidate programs. Use web_fetch to read the
+    actual solicitation page and pull current deadlines, award amounts, and
+    eligibility language.
+  - Prefer fetched .gov sources (reliability >= 0.9) over Wikipedia or
+    third-party summaries (reliability <= 0.7).
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - Every factual claim must include source URL(s) and a confidence score 0.0-1.0.
+  - Reject any source with reliability_score < 0.4.
+  - Authoritative tier (>= 0.8): grants.gov, fdep.gov, sfwmd.gov, swfwmd.gov,
+    restore.gov, epa.gov, noaa.gov, congress.gov, *.fl.gov.
+  - Surface uncertainty rather than guessing. If a deadline or amount is unclear,
+    say so explicitly with confidence < 0.5.
+  - Prefer Florida-precedent grants and Florida-active programs over national
+    averages.
+  - If the project's profile makes it ineligible for a category (e.g., navigable
+    waterway dredging, beach renourishment), flag the disqualifier in the
+    `risks_and_disqualifiers` field — do not silently filter.
+
+# ---- User prompt template ---------------------------------------------------
+# Jinja2 syntax. Optional fields are wrapped in {%- if %} blocks and silently
+# omitted when null. Bracketed placeholders from the binder are replaced with
+# {{ template_variables }} bound to inputs above.
+user: |
+  Project context:
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Project type: {{ project_type }}
+  - Estimated cost: ${{ "{:,}".format(estimated_cost_usd) }}
+  {%- if project_overview %}
+  - Overview: {{ project_overview }}
+  {%- endif %}
+  {%- if p3_intent %}
+  - P3 intent: {{ p3_intent }}
+  {%- endif %}
+  {%- if timeline %}
+  - Timeline: {{ timeline }}
+  {%- endif %}
+
+  Identify, in this order:
+
+  1. Top 5-7 state, federal, and regional grant programs this project would be
+     eligible for. Prioritize Florida-active sources: FDEP, SFWMD, SWFWMD,
+     RESTORE Act, NOAA RESTORE Council, EPA Section 319, USDA NRCS.
+
+  2. For each grant, fill the GrantOpportunity sub-object:
+     - name, administering_agency, program_url
+     - typical_award_usd_range
+     - eligibility_summary (1-2 sentences, project-relevant)
+     - deadline_or_cycle
+     - p3_compatible: "yes" | "with_caveats" | "no"
+       Use "with_caveats" (not "yes") whenever the program technically supports
+       P3 but carries material structural restrictions:
+         - it's a loan program rather than a grant (e.g., CWSRF)
+         - the municipality must be the named applicant (e.g., RESTORE Act)
+         - mandatory interlocal agreement or MOU between municipality and partner
+         - matching-fund rules that constrain the P3 capital share
+       Reserve "yes" for clean P3 fits with no material restrictions.
+       Use "no" only when the program is structurally incompatible.
+     - documentation_required (list)
+     - florida_precedents (list of {project, year, outcome, url})
+     - confidence (0.0-1.0)
+     - sources (list of {url, reliability_score})
+
+  3. Risks and disqualifiers: matching-fund requirements, restrictive use
+     clauses, long approval windows, project-type ineligibilities.
+
+  4. P3 contractors or firms with documented Florida execution on similar
+     project types (cite project + year + outcome).
+
+  Return as a ResearchBrief.
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints (for the Context Assembler) ----------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 6
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - grants.gov
+      - fdep.gov
+      - sfwmd.gov
+      - swfwmd.gov
+      - restore.gov
+      - epa.gov
+      - noaa.gov
+      - usda.gov
+      - "*.fl.gov"
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S6-1/golden.jsonl
+  min_pass_rate: 0.85

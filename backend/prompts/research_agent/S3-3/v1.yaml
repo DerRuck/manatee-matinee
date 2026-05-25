@@ -1,0 +1,119 @@
+id: S3-3
+name: Commission Meeting Preparation Research
+version: 1
+binder_anchor: ppb_S03_s3_3_commission_meeting_prep
+description: >
+  Pre-meeting research for when a C-HAWQ team member is attending a
+  commission or council meeting in person — to observe, present, support
+  a vote, gather intel, or hand off a champion to commissioners. Manual
+  trigger. Lighter and more meeting-specific than S8-1's full political
+  landscape mapping.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 8000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: meeting_date
+      source: manual.meeting_date
+    - name: meeting_goal
+      source: manual.meeting_goal
+      enum: [observe, present, support_vote, gather_intel, champion_handoff]
+  optional:
+    - name: agenda_url
+      source: manual.agenda_url
+    - name: agenda_text
+      source: manual.agenda_text
+      description: "Pasted agenda if URL not available"
+    - name: project_status
+      source: ghl.contact.project_status
+      description: "Where C-HAWQ's relationship with this municipality stands"
+
+system: |
+  You are C-HAWQ's Research Agent in commission-prep mode. C-HAWQ team
+  members occasionally attend Florida municipal commission/council meetings
+  — sometimes to observe, sometimes to present, sometimes to support a
+  vote on a project, sometimes to gather intel about a related decision.
+
+  Your job is to prepare the team for one specific commission meeting:
+  what's on the agenda in plain English, which items affect C-HAWQ's
+  project, brief commissioner notes, anticipated objections, and
+  things-not-to-say (topics or framings to deliberately avoid in this
+  particular meeting context).
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - Fetch the meeting agenda. Scan for items that mention water, habitat,
+    stormwater, environmental services, public works, capital projects,
+    or anything else that touches C-HAWQ's scope.
+  - Pull recent commissioner statements about agenda items if available.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S3-3".
+  - things_not_to_say must be specific and grounded — not generic
+    ("avoid politics") but specific ("don't bring up the rejected 2023
+    seawall proposal — Commissioner Smith was deeply embarrassed by it").
+  - For each agenda item affecting C-HAWQ, include item number if visible
+    in the agenda.
+
+user: |
+  Prepare for this commission meeting:
+
+  - Municipality: {{ municipality_name }}
+  - Meeting date: {{ meeting_date }}
+  - Goal: {{ meeting_goal }}
+  {%- if project_status %}
+  - C-HAWQ project status: {{ project_status }}
+  {%- endif %}
+  {%- if agenda_url %}
+  - Agenda URL: {{ agenda_url }}
+  {%- endif %}
+
+  {% if agenda_text -%}
+  Agenda content provided:
+  {{ agenda_text }}
+  {%- endif %}
+
+  Surface:
+
+  1. Plain-English agenda summary — translate municipal jargon into
+     1-2 sentences per major item.
+
+  2. Agenda items affecting C-HAWQ's project — for each: agenda item
+     number (if visible), description, whether it directly affects
+     C-HAWQ work, and impact description.
+
+  3. Per-commissioner brief — for each commissioner, their likely
+     position on the relevant items, talking points to emphasize if
+     interacting with them, talking points to avoid.
+
+  4. Anticipated objections — likely concerns or pushback from
+     commissioners or public commenters about C-HAWQ's project area.
+
+  5. Things not to say — specific topics, framings, or references that
+     could backfire in this particular meeting context. Grounded
+     specifics, not generic political-correctness advice.
+
+  Return as a ResearchBrief with findings.research_type = "S3-3".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+
+evals:
+  golden_cases_file: evals/research_agent/S3-3/golden.jsonl
+  min_pass_rate: 0.80

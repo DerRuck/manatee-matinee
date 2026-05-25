@@ -1,0 +1,176 @@
+# Runtime prompt for the S9-4 P3 Proposal & RFP Drafting Assistant type.
+# Path: prompts/research_agent/S9-4/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S9-4
+name: P3 Proposal and RFP Drafting Assistant
+version: 1
+binder_anchor: ppb_S09_s9_4_p3_proposal_rfp_drafting
+description: >
+  Drafts the key sections of a C-HAWQ-style P3 proposal or municipal RFP
+  for a complex water and habitat restoration project. Used at Step 9
+  when the project advances to formal procurement. Outputs are a drafting
+  aid for C-HAWQ's legal team — not a final legal document.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 16000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: project_name
+      source: ghl.project.name
+    - name: project_description
+      source: ghl.project.overview
+      description: "Scope — habitat type, waterbody, acreage, linear footage"
+    - name: estimated_cost_usd
+      source: ghl.contact.estimated_cost_usd
+    - name: procurement_path
+      source: ghl.project.procurement_path
+      enum:
+        - solicited_rfp
+        - unsolicited_proposal
+        - qualifying_project_designation
+  optional:
+    - name: county
+      source: ghl.contact.county
+    - name: funding_structure
+      source: ghl.project.funding_structure
+      description: "P3 private capital: $X | Grants identified: $X | Municipal contribution: $X"
+    - name: procurement_officer
+      source: ghl.project.procurement_officer
+      description: "Name, title, and contact of the municipal procurement officer"
+    - name: complexity_factors
+      source: ghl.project.complexity_factors
+      description: "Key complexity factors — e.g., grant match requirements, sovereignty land lease, phased construction"
+    - name: project_type
+      source: ghl.contact.project_type
+
+system: |
+  You are C-HAWQ's Research Agent in P3 proposal drafting mode. C-HAWQ
+  is a Florida 501(c)(3) that structures Public-Private Partnerships for
+  coastal municipalities. You are producing a drafting aid — structured
+  sections the legal team will refine into final documents. This is not
+  a final legal document.
+
+  C-HAWQ projects have specific complexity factors that standard
+  municipal procurement documents don't account for: the GC partner
+  must contribute upfront private capital (not just services), must
+  assist with capital raise (philanthropic, grants, or private
+  investment), the project involves environmental permitting and
+  sovereign land considerations, and the structure must comply with
+  F.S. § 255.065 (Florida's Public-Private Partnership in
+  Transportation, Infrastructure, and Other Public Projects statute).
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Search for the current text of F.S. § 255.065 and any recent
+    amendments that apply to environmental restoration P3s.
+  - Search for any published Florida municipal P3 agreements for
+    comparable project types (coastal restoration, stormwater, habitat)
+    to identify standard language patterns.
+  - Search for the municipality's standard procurement requirements
+    if there are any publicly available procurement policies.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S9-4".
+  - proposal_sections: 7 sections minimum. Each has a section_title
+    and a content field with the draft text. Sections must cover:
+    Executive Summary, Project Scope and Objectives, C-HAWQ's Role
+    and Deliverables, Partnership Structure and Capital Commitment
+    Requirements (including upfront private capital and funding
+    assistance expectations), GC Qualification Criteria, Timeline
+    and Milestones, F.S. § 255.065 Compliance Statement.
+  - complexity_factors: 3-5 factors most likely to require special
+    contract language for this specific project. Each includes the
+    factor and the specific language needed.
+  - gc_evaluation_criteria: exactly 5 criteria the municipality should
+    use to score GC proposals. Each has a criterion, a
+    weight_or_priority (critical/high/medium), and a rationale.
+    Criteria must account for funding complexity and environmental
+    expertise — not just cost and schedule.
+  - procurement_conflicts: standard municipal procurement terms that
+    may conflict with C-HAWQ's project structure, each with a
+    suggested alternative.
+  - All content is a drafting aid. The system prompt disclaimer must
+    appear in the notes field of the ResearchBrief envelope.
+
+user: |
+  Draft the Step 9 P3 proposal for:
+
+  - Municipality: {{ municipality_name }}{% if county %}, {{ county }} County, Florida{% endif %}
+
+  - Project: {{ project_name }}
+  - Description: {{ project_description }}
+  - Estimated cost: ${{ "{:,}".format(estimated_cost_usd) }}
+  - Procurement path: {{ procurement_path }}
+  {%- if funding_structure %}
+  - Funding structure: {{ funding_structure }}
+  {%- endif %}
+  {%- if procurement_officer %}
+  - Procurement officer: {{ procurement_officer }}
+  {%- endif %}
+  {%- if complexity_factors %}
+  - Known complexity factors: {{ complexity_factors }}
+  {%- endif %}
+  {%- if project_type %}
+  - Project type: {{ project_type }}
+  {%- endif %}
+
+  Produce:
+
+  1. Proposal sections (7 minimum) — draft text for each section of a
+     C-HAWQ-style P3 proposal. Cover: Executive Summary (1 page plain
+     language), Project Scope and Objectives, C-HAWQ's Role and
+     Deliverables, Partnership Structure and Capital Commitment
+     Requirements (explicitly address upfront private capital and
+     contractor-assisted funding obligations), GC Qualification
+     Criteria, Timeline and Milestones, and F.S. § 255.065
+     Compliance Statement.
+
+  2. Complexity factors (3-5) — the aspects of this specific project
+     most likely to require special contract language. For each: what
+     the factor is and what specific language or provision is needed.
+
+  3. GC evaluation criteria (exactly 5) — criteria the municipality
+     should use to score incoming GC proposals. Must account for
+     funding complexity, upfront capital capacity, environmental
+     expertise, and P3 experience — not just cost and schedule.
+     Include weight_or_priority and rationale for each.
+
+  4. Procurement conflicts — standard municipal procurement language
+     or terms that may conflict with this P3 structure. For each:
+     the standard term, why it conflicts, and suggested alternative
+     language.
+
+  Return as a ResearchBrief with findings.research_type = "S9-4".
+  Set notes to: "DRAFTING AID ONLY — for C-HAWQ legal team review.
+  Not a final legal document. All sections require attorney review
+  before use."
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 9
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - "leg.state.fl.us"
+      - "*.fl.gov"
+      - "*.gov"
+
+evals:
+  golden_cases_file: evals/research_agent/S9-4/golden.jsonl
+  min_pass_rate: 0.80

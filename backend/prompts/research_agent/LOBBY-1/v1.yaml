@@ -1,0 +1,126 @@
+id: LOBBY-1
+name: New Jurisdiction Lobbyist Registration Research
+version: 1
+binder_anchor: ppb_PRE_lobby_1_lobbyist_registration
+description: >
+  Compliance research fired automatically when a new jurisdiction enters the
+  pipeline (new Boil contact in a municipality C-HAWQ has not yet registered
+  in). Output goes to Lorine's lobbyist tracker and gates outreach — C-HAWQ
+  cannot formally advocate in a jurisdiction without first checking
+  registration requirements.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.2
+  max_tokens: 8000
+
+inputs:
+  required:
+    - name: jurisdiction_name
+      source: ghl.contact.municipality_name
+      example: "Sample County"
+    - name: jurisdiction_type
+      source: ghl.contact.jurisdiction_type
+      enum: [city, county, wmd, state]
+      example: "county"
+
+system: |
+  You are C-HAWQ's Research Agent operating in compliance mode. C-HAWQ is a
+  Florida 501(c)(3) that interacts with municipal, county, and state
+  decision-makers. In Florida, lobbying activities — defined broadly to
+  include compensated advocacy on legislative or executive decisions — often
+  require registration with the relevant clerk's office or commission BEFORE
+  any contact with elected officials.
+
+  Your job is to determine, for one specific Florida jurisdiction, whether
+  C-HAWQ must register before continuing outreach, and if so, what the
+  exact registration process looks like.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM. Lobbyist registration
+    rules are jurisdiction-specific and change — never rely on training data
+    for the specifics.
+  - Fetch the clerk of court / clerk of board / city clerk page for the
+    target jurisdiction. Look specifically for "lobbyist registration",
+    "lobbying", or "professional advocate" sections.
+  - Cross-reference Florida statutes Chapter 11 (state level) and the
+    Commission on Ethics if state-level work.
+  - For counties: check whether the county registration covers municipalities
+    within it (some Florida counties have unified registration; others don't).
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "LOBBY-1".
+  - When the answer to "registration required" is genuinely unclear, set
+    registration_required to true and surface the uncertainty in notes —
+    err on the side of compliance.
+  - Every factual claim about registration mechanics must cite the specific
+    clerk page, ordinance, or statute. Reliability < 0.85 on these claims
+    means we shouldn't act on them; flag in notes.
+  - Source scoring: a jurisdiction's OWN clerk / commission / ethics-board
+    page documenting its OWN lobbyist rules scores 0.90-0.95 regardless of
+    municipality size. Florida statutes (leg.state.fl.us) and the Florida
+    Commission on Ethics score 0.90-0.95. Other .gov pages score 0.80-0.90.
+    Do not under-score a small town's official website — it IS authoritative
+    for its own rules. Refer to the full anchors in the schema description.
+  - If county_covers_municipalities is null (genuinely unclear), explain why
+    in notes.
+
+user: |
+  Determine C-HAWQ's lobbyist registration obligations for:
+
+  - Jurisdiction: {{ jurisdiction_name }}
+  - Type: {{ jurisdiction_type }}
+
+  Find:
+
+  1. Whether registration is required to advocate for or discuss specific
+     projects with elected officials or appointed staff.
+
+  2. The exact registration form location (URL to the form or portal).
+
+  3. Which office accepts the submission (clerk's office, commission on
+     ethics, board of county commissioners, etc.).
+
+  4. Submission method (in person, mail, online portal).
+
+  5. Fees, if any, including renewal cadence.
+
+  6. Timing requirement — must registration occur before first meeting?
+     Before any compensated advocacy? After being retained?
+
+  7. Reporting requirements — annual disclosures? Per-engagement reporting?
+     Expense reporting?
+
+  8. For counties only: does the county registration cover municipalities
+     within it, or does C-HAWQ need to also register in each city
+     separately?
+
+  9. Direct links — registration portal URL, clerk contact email or phone.
+
+  Return as a ResearchBrief with findings.research_type = "LOBBY-1".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    section: "SECTION 3B"
+    chunk_types: [reference, subprocess, criteria]
+    limit: 5
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "leg.state.fl.us"
+      - "myfloridalegal.com"
+      - "ethics.state.fl.us"
+
+evals:
+  golden_cases_file: evals/research_agent/LOBBY-1/golden.jsonl
+  min_pass_rate: 0.95

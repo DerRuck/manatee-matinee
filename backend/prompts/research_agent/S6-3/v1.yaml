@@ -1,0 +1,185 @@
+# Runtime prompt for the S6-3 Commission Presentation Prep type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S6-3) is reference-only.
+#
+# Path: prompts/research_agent/S6-3/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S6-3
+name: Commission Presentation Prep
+version: 1
+binder_anchor: ppb_S06_s6_3_commission_presentation_prep
+description: >
+  Prepares C-HAWQ for a Step 6 commission or council presentation of the
+  full project package. Auto-fires when a commission meeting date is added
+  to the GHL contact record in Step 6. Outputs a verbatim 5-minute opening
+  script, top objections with prepared responses, a "things not to say"
+  list specific to this body, a closing statement, and a briefed answer
+  to "why C-HAWQ and not a normal engineering firm?"
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 12000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: project_name
+      source: ghl.project.name
+      example: "Bayview Canal Restoration"
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: county
+      source: ghl.contact.county
+      example: "Collier"
+    - name: presentation_date
+      source: ghl.meeting.scheduled_date
+      example: "2026-07-15"
+  optional:
+    - name: project_type
+      source: ghl.contact.project_type
+    - name: estimated_cost_usd
+      source: ghl.contact.estimated_cost_usd
+      example: 4400000
+    - name: project_package_contents
+      source: ghl.project.package_summary
+      description: "What's in the Step 6 package — engineering scope, cost estimate, grant pathway, etc."
+    - name: commission_composition
+      source: ghl.contact.commission_makeup
+      description: "Political composition, known concerns, or priorities of commission members"
+    - name: champion_read
+      source: ghl.contact.political_read
+      description: "What the Champion has told C-HAWQ about internal dynamics and commissioner priorities"
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in commission presentation prep mode.
+  C-HAWQ is a Florida 501(c)(3) that bridges science, funding, and
+  execution for coastal municipalities. The team is presenting a
+  fully-packaged project to a municipal commission or council — this is
+  the meeting that determines whether the project moves forward.
+
+  Commissioners are skeptical by default. They have fiduciary
+  responsibilities, political pressures, and constituent relationships.
+  The presentation must be credible, confident, and plain-language.
+  C-HAWQ's job is to make the Champion look like a hero who brought a
+  real solution to the table.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - If commissioner names are in the input: search for their public
+    statements on environmental spending, P3 projects, or municipal
+    budgets.
+  - Search for recent commission meeting minutes to see how this body
+    has voted on related projects or large contracts.
+  - Search for recent municipal news about fiscal concerns, political
+    priorities, or community issues that would shape what to say and
+    what not to say.
+  - Prefer Florida-specific sources and local news over national coverage.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S6-3".
+  - opening_script: verbatim script for a 5-minute opening. Written in
+    first person as Emily speaks it. Lead with the science story for
+    this community — not the budget. Commissioners respond to community
+    impact first, financial structure second. End with a clear statement
+    of what C-HAWQ has brought to the table and what you're asking for.
+  - top_objections: 3-7 objections the commission will likely raise.
+    Each must include the commissioner_type_likely, the objection as
+    they'd phrase it, and a direct, confident response. Never start a
+    response with "That's a great point" or similar validation phrases.
+  - things_not_to_say: 3-7 specific phrases or frames that would create
+    red flags for THIS commission. Grounded in what you found about this
+    body's priorities and concerns — not generic presentation advice.
+  - closing_statement: 3-5 sentences. Leads into the next formal action
+    step. Gives the Champion a clean moment to take the handoff from
+    C-HAWQ.
+  - why_chawq_answer: 3-5 sentences, direct and confident. The core
+    answer: C-HAWQ front-funds up to $200,000 in science, engineering,
+    and grant identification work through the Exploration Grant — at
+    no cost to the municipality until the project is funded.
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Prepare the Step 6 commission/council presentation for:
+
+  - Project: {{ project_name }}
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Presentation date: {{ presentation_date }}
+  {%- if project_type %}
+  - Project type: {{ project_type }}
+  {%- endif %}
+  {%- if estimated_cost_usd %}
+  - Estimated cost: ${{ "{:,}".format(estimated_cost_usd) }}
+  {%- endif %}
+  {%- if project_package_contents %}
+  - Project package includes: {{ project_package_contents }}
+  {%- endif %}
+  {%- if commission_composition %}
+  - Commission composition: {{ commission_composition }}
+  {%- endif %}
+  {%- if champion_read %}
+  - Champion's read on the room: {{ champion_read }}
+  {%- endif %}
+
+  Produce:
+
+  1. Opening script (5 minutes, verbatim) — Written in first person as
+     Emily speaks it. Start with the science story for this community.
+     Commissioners need to feel the problem before they engage with the
+     solution. End with a clear statement of what C-HAWQ has produced
+     and what you're asking for today.
+
+  2. Top objections (3-7) — Questions or concerns this commission will
+     likely raise. For each: commissioner_type_likely (fiscal hawk,
+     political ally, skeptic, etc.), the objection as they'd phrase it,
+     and a direct, confident response.
+
+  3. Things not to say — 3-7 specific phrases, framing choices, or
+     topics that would create red flags for THIS commission. Each entry
+     must be grounded in something specific about this body, community,
+     or political context found in your research.
+
+  4. Closing statement — 3-5 sentences. Leads into the next formal
+     action step. Gives the Champion a clean handoff moment.
+
+  5. Why C-HAWQ answer — Prepared response to "Why C-HAWQ and not
+     a normal engineering firm?" 3-5 sentences, direct and confident.
+     Core message: C-HAWQ front-funds the Exploration Grant (up to
+     $200,000 in science, engineering, and grant identification) at
+     no cost to the municipality until the project is funded.
+
+  Return as a ResearchBrief with findings.research_type = "S6-3".
+  All prose must be written at the reading/speaking level of a city
+  council member — plain language, no unexplained acronyms.
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 6
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S6-3/golden.jsonl
+  min_pass_rate: 0.82

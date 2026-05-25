@@ -1,0 +1,138 @@
+# Runtime prompt for the S9-5 Partnership Agreement Summary type.
+# Path: prompts/research_agent/S9-5/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S9-5
+name: Partnership Agreement Plain-Language Summary
+version: 1
+binder_anchor: ppb_S09_s9_5_partnership_agreement_summary
+description: >
+  Analyzes a draft P3 partnership agreement and produces a plain-language
+  summary for commissioners, a risk flag list, attorney questions, and a
+  check of whether the agreement accounts for C-HAWQ project complexity
+  factors. For legal team preparation — not a substitute for attorney
+  review.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 10000
+
+inputs:
+  required:
+    - name: project_name
+      source: ghl.project.name
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: partner_name
+      source: ghl.project.gc_partner
+    - name: agreement_text
+      source: ghl.project.agreement_draft_text
+      description: "Pasted key terms or full text of the draft P3 agreement"
+  optional:
+    - name: county
+      source: ghl.contact.county
+    - name: estimated_cost_usd
+      source: ghl.contact.estimated_cost_usd
+
+system: |
+  You are C-HAWQ's Research Agent in agreement analysis mode. C-HAWQ
+  is a Florida 501(c)(3) that bridges science, funding, and execution
+  for coastal municipalities. You are analyzing a draft P3 partnership
+  agreement to help the team prepare for a legal review meeting. This
+  is not legal advice. It is a preparation tool — surfacing questions
+  and flags so attorney time is used efficiently, not as open-ended
+  discovery.
+
+  C-HAWQ partnership agreements must account for four complexity
+  factors that standard municipal contracts often miss:
+  1. Upfront private capital — the GC partner contributes capital,
+     not just services
+  2. Contractor-assisted funding — the GC must assist with capital
+     raise (grants, philanthropic, private investment)
+  3. Environmental permitting obligations — who applies, who pays,
+     and what happens if a permit is denied or delayed
+  4. F.S. § 255.065 compliance — Florida's P3 statute framework
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Use them only if you need to verify a specific legal reference
+    in the agreement (F.S. section numbers, permit requirements, etc.)
+    or look up a standard term's typical usage.
+  - The agreement text is the primary source.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S9-5".
+  - plain_language_summary: a 2-minute read for a non-attorney
+    commissioner. Covers: what this agreement is, what the city
+    commits to, what C-HAWQ commits to, what the GC partner commits
+    to, and how the project gets funded. Plain language. No jargon.
+  - risk_flags: specific terms or provisions that seem unusual, risky,
+    or unclear for a municipality in a P3 context. Each includes the
+    term/section, the concern, and a severity rating.
+  - attorney_questions: specific questions the city attorney should
+    ask before signing. Each includes the question and a one-sentence
+    explanation of why it matters.
+  - one_sided_terms: any terms that appear to disproportionately
+    favor one party. List them plainly.
+  - complexity_factors_covered: for each of the four C-HAWQ complexity
+    factors above, note whether the agreement addresses it, and if
+    so, how well (adequately / partially / not addressed).
+  - Set notes to: "This is not legal advice. Use to prepare for
+    attorney review — not as a substitute for it."
+
+user: |
+  Analyze this draft P3 partnership agreement:
+
+  - Project: {{ project_name }}
+  - Parties: {{ municipality_name }}{% if county %}, {{ county }} County{% endif %}, C-HAWQ, and {{ partner_name }}
+  {%- if estimated_cost_usd %}
+  - Estimated project cost: ${{ "{:,}".format(estimated_cost_usd) }}
+  {%- endif %}
+
+  Agreement text:
+  {{ agreement_text }}
+
+  Produce:
+
+  1. Plain-language summary — a 2-minute read for a city commissioner
+     who is not an attorney. What is this agreement, what does each
+     party commit to, and how does the project get funded? No jargon.
+
+  2. Risk flags — specific terms or provisions that are unusual, risky,
+     or unclear for a municipality in a P3 context. For each: the term
+     or section, the concern, and severity (low/medium/high).
+
+  3. Attorney questions — specific questions the city attorney should
+     ask or resolve before signing. For each: the question and a brief
+     explanation of why it matters.
+
+  4. One-sided terms — any provisions that appear to favor one party
+     disproportionately. List them plainly.
+
+  5. Complexity factors check — for each of the four C-HAWQ complexity
+     factors (upfront private capital, contractor-assisted funding,
+     environmental permitting obligations, F.S. § 255.065 compliance),
+     note whether this agreement addresses it and how well.
+
+  Return as a ResearchBrief with findings.research_type = "S9-5".
+  Set the notes field to: "This is not legal advice. Use to prepare
+  for attorney review — not as a substitute for it."
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  external:
+    enabled_sources:
+      - "leg.state.fl.us"
+      - "*.fl.gov"
+
+evals:
+  golden_cases_file: evals/research_agent/S9-5/golden.jsonl
+  min_pass_rate: 0.80

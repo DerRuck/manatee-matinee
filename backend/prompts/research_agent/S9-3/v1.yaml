@@ -1,0 +1,156 @@
+# Runtime prompt for the S9-3 Grant Compliance Checklist type.
+# Path: prompts/research_agent/S9-3/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S9-3
+name: Grant Compliance Checklist
+version: 1
+binder_anchor: ppb_S09_s9_3_grant_compliance_checklist
+description: >
+  Produces a grant compliance package immediately after a grant award is
+  confirmed. Auto-fires when a grant award is logged in GHL at Step 9.
+  Outputs program-specific compliance requirements, a documentation
+  checklist keyed to reporting milestones, day-one record-keeping
+  guidance, common pitfalls and preventions, and a 6-month check-in
+  email template to the program officer.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 10000
+
+inputs:
+  required:
+    - name: project_name
+      source: ghl.project.name
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: grant_program_name
+      source: ghl.project.grant_program_name
+      description: "Official program name — e.g., 'FDEP Resilient Florida Grant Program'"
+    - name: award_amount_usd
+      source: ghl.project.grant_award_amount
+    - name: grant_period_start
+      source: ghl.project.grant_period_start
+    - name: grant_period_end
+      source: ghl.project.grant_period_end
+    - name: administering_agency
+      source: ghl.project.grant_agency
+  optional:
+    - name: compliance_contacts
+      source: ghl.project.grant_compliance_contacts
+    - name: project_scope
+      source: ghl.project.overview
+    - name: p3_partners
+      source: ghl.project.p3_partners
+      description: "P3 partners involved in the project"
+
+system: |
+  You are C-HAWQ's Research Agent in grant compliance mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. A grant has been awarded. Your job is to
+  produce a compliance package the team can use from day one through
+  closeout to keep this grant clean.
+
+  Most grant clawbacks and compliance failures are preventable.
+  They happen because teams didn't know what they needed to track,
+  started too late, or let program officer relationships go cold.
+  This package exists to prevent all three.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM.
+  - Search for the specific grant program's official compliance guide,
+    terms and conditions, or reporting requirements. Many programs
+    publish these on agency websites (fdep.gov, epa.gov, noaa.gov,
+    etc.).
+  - Fetch the actual program page to pull current reporting milestones,
+    documentation requirements, and any recent compliance updates.
+  - Search for any known audit findings or compliance issues associated
+    with this program — they surface common pitfalls.
+  - Prefer official agency sources (reliability >= 0.8).
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S9-3".
+  - program_requirements_summary: 2-3 paragraphs covering what this
+    program requires, its reporting structure, and its key compliance
+    hot spots. Plain language — written for the project manager who
+    will use this daily.
+  - compliance_checklist: one entry per requirement. Each must have
+    the requirement, when it's due (timing), and the specific
+    documentation needed.
+  - day_one_records: the exact records the team should start
+    capturing on day one of project execution, before any money
+    is spent. At minimum: procurement documentation, contractor
+    selection records, environmental baseline data.
+  - common_pitfalls: 3-7 specific ways teams get flagged or have
+    grants clawed back under this program, each with a concrete
+    prevention action.
+  - six_month_checkin_email: a template email to the grant program
+    officer at the 6-month mark — warm, professional, relationship-
+    maintaining. Subject line and body.
+
+user: |
+  Build the grant compliance package for:
+
+  - Project: {{ project_name }} — {{ municipality_name }}
+  - Grant program: {{ grant_program_name }}
+  - Award amount: ${{ "{:,}".format(award_amount_usd) }}
+  - Grant period: {{ grant_period_start }} to {{ grant_period_end }}
+  - Administering agency: {{ administering_agency }}
+  {%- if compliance_contacts %}
+  - Compliance contacts: {{ compliance_contacts }}
+  {%- endif %}
+  {%- if project_scope %}
+  - Project scope: {{ project_scope }}
+  {%- endif %}
+  {%- if p3_partners %}
+  - P3 partners: {{ p3_partners }}
+  {%- endif %}
+
+  Produce:
+
+  1. Program requirements summary — 2-3 paragraphs on what this
+     program requires: reporting structure, key compliance obligations,
+     and the areas where projects most often run into problems. Plain
+     language.
+
+  2. Compliance checklist — every documentation requirement and
+     reporting milestone for this program. For each: the requirement,
+     when it's due, and what documentation is specifically needed.
+
+  3. Day-one records — exactly what the team should start capturing
+     from day one before any project funds are spent. Be specific —
+     what files, what format, where they get stored.
+
+  4. Common pitfalls — 3-7 specific reasons grants in this program
+     get flagged or clawed back. For each: the pitfall and a concrete
+     prevention action.
+
+  5. Six-month check-in email — template email to the grant program
+     officer at the 6-month mark. Warm and professional. Shows the
+     project is on track and maintains the relationship. Subject
+     line included.
+
+  Return as a ResearchBrief with findings.research_type = "S9-3".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  external:
+    enabled_sources:
+      - fdep.gov
+      - epa.gov
+      - noaa.gov
+      - grants.gov
+      - "*.fl.gov"
+      - "*.gov"
+
+evals:
+  golden_cases_file: evals/research_agent/S9-3/golden.jsonl
+  min_pass_rate: 0.82
