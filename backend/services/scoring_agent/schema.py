@@ -354,6 +354,18 @@ class ScoringResult(BaseModel):
         min_length=1,
         description="GHL contact id — scoring is always per-contact.",
     )
+    contact_name: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable label for the contact (e.g. 'Jamie Sheehan'). "
+            "Populated by the runner from the contact record so file names "
+            "and document headers can use it instead of the opaque GHL id."
+        ),
+    )
+    contact_email: str | None = Field(
+        default=None,
+        description="Contact email — second-choice display fallback after contact_name.",
+    )
     municipality_name: str | None = None
 
     generated_at: datetime

@@ -14,6 +14,7 @@ Re-runs overwrite files with the same name so the folder doesn't accumulate stal
 from __future__ import annotations
 
 import io
+import re
 from typing import Any
 
 from services.scoring_agent.schema import ScoringResult
@@ -38,12 +39,52 @@ _IMPACT_PREFIX = {
 
 
 # ---------------------------------------------------------------------------
-# Filename
+# Display label + filename
 # ---------------------------------------------------------------------------
 
+def display_label(result: ScoringResult) -> str:
+    """Readable identifier for one scored contact.
+
+    Priority chain — pick the first non-empty:
+      1. contact_name        (e.g. 'Jamie Sheehan')
+      2. contact_email
+      3. municipality_name
+      4. contact_id          (last resort — the opaque GHL id)
+
+    Used by both the filename and the docx header so the team never has to
+    eyeball an id to figure out which contact a file belongs to.
+    """
+    candidates = (
+        result.contact_name,
+        result.contact_email,
+        result.municipality_name,
+        result.contact_id,
+    )
+    for value in candidates:
+        if value:
+            cleaned = str(value).strip()
+            if cleaned:
+                return cleaned
+    return "Contact"
+
+
+_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_COLLAPSE_UNDERSCORES_RE = re.compile(r"_+")
+
+
+def _slug_for_filename(value: str) -> str:
+    """Lowercase, ASCII-safe slug — emails keep their structure via `_at_`."""
+    s = value.replace("@", "_at_").replace(" ", "_")
+    s = _FILENAME_SAFE_RE.sub("_", s)
+    s = _COLLAPSE_UNDERSCORES_RE.sub("_", s)
+    s = s.strip("._-").lower()
+    return s or "contact"
+
+
 def filename_for(result: ScoringResult, ext: str) -> str:
-    safe_contact = (result.contact_id or "unknown").replace("/", "_").replace("@", "_at_")
-    return f"pipeline_score_{safe_contact}_{result.run_id[:8]}.{ext}"
+    """`pipeline_score_<readable-slug>_<run-prefix>.<ext>`."""
+    slug = _slug_for_filename(display_label(result))
+    return f"pipeline_score_{slug}_{result.run_id[:8]}.{ext}"
 
 
 # ---------------------------------------------------------------------------
@@ -61,12 +102,23 @@ def render_docx(result: ScoringResult) -> bytes:
     apply_brand_styles(doc)
 
     f = result.findings
-    contact_label = result.municipality_name or result.contact_id or "Contact"
+    primary_label = display_label(result)
+    # When the primary label is a person's name (or email), surface the
+    # municipality as secondary context so the doc header still tells you
+    # which city this lead is in.
+    secondary = (
+        result.municipality_name
+        if result.municipality_name and result.municipality_name != primary_label
+        else None
+    )
+    subtitle_bits = [f"PIPELINE-SCORE v{result.prompt_version} · {result.triggered_by}"]
+    if secondary:
+        subtitle_bits.append(secondary)
 
     add_brand_header(
         doc,
-        title=f"Pipeline Score — {contact_label}",
-        subtitle=f"PIPELINE-SCORE v{result.prompt_version} · {result.triggered_by}",
+        title=f"Pipeline Score — {primary_label}",
+        subtitle=" · ".join(subtitle_bits),
     )
 
     add_meta_line(

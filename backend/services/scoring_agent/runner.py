@@ -218,6 +218,19 @@ def run(
     parsed["municipality_name"] = (
         parsed.get("municipality_name") or context.get("municipality_name")
     )
+    # Stash a human-readable label so file names and doc headers don't
+    # fall back to the opaque GHL contact_id. Source of truth is the
+    # flattened contact_record built by services.firestore.contact_context.
+    contact_record = context.get("contact_record") or {}
+    parsed["contact_name"] = (
+        parsed.get("contact_name")
+        or contact_record.get("contact_name")
+        or _join_name(contact_record.get("first_name"), contact_record.get("last_name"))
+    )
+    parsed["contact_email"] = (
+        parsed.get("contact_email")
+        or contact_record.get("email")
+    )
     parsed["generated_at"] = datetime.now(timezone.utc).isoformat()
     parsed.setdefault("triggered_by", context.get("triggered_by", "manual"))
 
@@ -245,6 +258,12 @@ def run(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _join_name(first: Any, last: Any) -> str | None:
+    parts = [str(p).strip() for p in (first, last) if p]
+    joined = " ".join(parts).strip()
+    return joined or None
+
 
 def _jinja_safe(inputs: dict[str, Any]) -> dict[str, Any]:
     """Make complex values (dicts, lists) render cleanly inside the user template.
