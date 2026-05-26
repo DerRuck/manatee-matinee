@@ -148,7 +148,6 @@ def _upsert_contact_score(result: ScoringResult, meta: dict[str, Any]) -> None:
         "findings":          findings.model_dump(mode="json"),
         "model":             meta.get("model"),
     }
-    # contact_scores is a new collection added for the workbook UI. Use a
-    # fixed name (not in settings yet) — when we wire it in settings.py,
-    # only this line changes.
-    client.collection("contact_scores").document(result.contact_id).set(payload)
+    client.collection(
+        settings.firestore_contact_scores_collection
+    ).document(result.contact_id).set(payload)

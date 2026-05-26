@@ -7,6 +7,30 @@
         { "fieldPath": "contact_id", "order": "ASCENDING" },
         { "fieldPath": "finished_at", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "contact_scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "lead_heat", "order": "ASCENDING" },
+        { "fieldPath": "lead_heat_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "contact_scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "current_step", "order": "ASCENDING" },
+        { "fieldPath": "lead_heat_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "contact_scores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ready_to_advance", "order": "ASCENDING" },
+        { "fieldPath": "lead_heat_score", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

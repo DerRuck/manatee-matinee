@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # `vector_chunks` placeholder which was scaffolding from before the lock.
     firestore_documents_collection: str = "documents"
     firestore_chunks_collection: str = "chunks"
+    # Per-contact rollup the workbook UI reads to render the lead-prioritization
+    # list. One row per contact_id, overwritten on each scoring run.
+    firestore_contact_scores_collection: str = "contact_scores"
+    # Per-sweep audit doc written by the daily scoring sweep.
+    firestore_scoring_sweeps_collection: str = "scoring_sweeps"
 
     # --- Vector embeddings (Vertex) ---
     vertex_embedding_model: str = "text-embedding-005"

@@ -22,7 +22,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import health, webhooks, agents
+from app.routes import health, webhooks, agents, scores, jobs
 from core.logging import configure_logging
 from core.settings import get_settings
 
@@ -72,6 +72,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
     app.include_router(agents.router, prefix="/agents", tags=["agents"])
+    app.include_router(scores.router, prefix="/scores", tags=["scores"])
+    app.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 
     return app
 
