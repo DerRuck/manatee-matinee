@@ -140,5 +140,9 @@ def test_agents_get_run_returns_doc(_mock_get):
 
 def test_webhooks_return_202():
     with TestClient(app) as client:
-        assert client.post("/webhooks/drive").status_code == 202
+        resp = client.post(
+            "/webhooks/drive",
+            headers={"X-Goog-Resource-State": "sync"},
+        )
+        assert resp.status_code == 202
         assert client.post("/webhooks/ghl", json={}).status_code == 202
