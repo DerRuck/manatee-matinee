@@ -81,18 +81,25 @@ class Fixture:
 
 
 def _contact_record(**overrides) -> dict[str, Any]:
-    """A reasonable default flattened contact_record. Mirrors what
-    build_context_from_contact emits so the agent sees a familiar shape.
+    """Flattened contact_record default. Mirrors what build_context_from_contact
+    emits so the agent sees a familiar shape.
+
+    Defaults are blank-ish (no name, no tags) — every fixture below
+    overrides the fields that matter to its pipeline state. Names,
+    municipalities, and project language are drawn from C-HAWQ's real
+    Rookery Bay NERR portfolio (the project thread shared with
+    test_all_agents.py) so the agent reasons over plausible signal
+    instead of synthetic 'Sample City' placeholders.
     """
     base = {
-        "contact_id":         "fixture-contact",
-        "contact_name":       "Sample Contact",
-        "first_name":         "Sample",
-        "last_name":          "Contact",
-        "email":              "contact@example.org",
+        "contact_id":         "",
+        "contact_name":       None,
+        "first_name":         None,
+        "last_name":          None,
+        "email":              None,
         "company_name":       None,
-        "municipality_name":  "Sample City",
-        "city":               "Sample City",
+        "municipality_name":  None,
+        "city":               None,
         "state":              "FL",
         "tags":               [],
         "type":               "lead",
@@ -121,20 +128,42 @@ def _run_summary(agent_type: str, days_ago: int, key_finding: str | None = None,
 FIXTURES: list[Fixture] = [
 
     # -----------------------------------------------------------------
-    # Step 1 cold — bare stub, no prior work, no signal
+    # Step 1 cold — Donna Medina, fresh referral from Jared at Rookery Bay.
+    # No outreach done yet, no signal beyond the referral note.
     # -----------------------------------------------------------------
     Fixture(
-        name="step1_cold",
+        name="step1_cold_everglades_referral",
         description=(
-            "Brand-new contact, no tags, no agent_runs, no comms. The "
-            "agent should place this at Step 1 with cold heat and low score."
+            "Donna Medina, Everglades City Manager — referred by Jared "
+            "post-Rookery Bay. No outreach done yet. Should land at Step 1 "
+            "with cold/simmer heat and a low score."
         ),
         context={
-            "contact_id":              "fixture-step1-cold",
-            "municipality_name":       "Sample City",
+            "contact_id":              "ghl_everglades_donna",
+            "municipality_name":       "Everglades City",
             "contact_record":          _contact_record(
-                contact_id="fixture-step1-cold",
-                tags=[],
+                contact_id="ghl_everglades_donna",
+                contact_name="Donna Medina",
+                first_name="Donna",
+                last_name="Medina",
+                email="dmedina@cityofeverglades.org",
+                company_name="City of Everglades City",
+                municipality_name="Everglades City",
+                city="Everglades City",
+                tags=["referral", "rookery-bay-network"],
+                custom_fields={
+                    "contact_notes": (
+                        "Referred by Jared at Rookery Bay NERR. Two-year focus on "
+                        "Barron River water quality and flooding. Familiar with "
+                        "C-HAWQ by reputation through the Rookery Bay agreement."
+                    ),
+                    "job_title": "City Manager",
+                },
+                contact_notes=(
+                    "Referred by Jared at Rookery Bay NERR. Two-year focus on "
+                    "Barron River water quality and flooding."
+                ),
+                job_title="City Manager",
             ),
             "agent_runs_summary":      [],
             "recent_communications":   None,
@@ -145,46 +174,65 @@ FIXTURES: list[Fixture] = [
         expected={
             "current_step_in":     [1, 2],
             "lead_heat_in":        ["cold", "simmer"],
-            "lead_heat_score_max": 40,
+            "lead_heat_score_max": 50,
             "ready_to_advance":    False,
         },
     ),
 
     # -----------------------------------------------------------------
-    # Step 2 simmer — initial outreach research done, contact responded
+    # Step 2 simmer — Marissa Figueroa (Coastal Training Program Coordinator
+    # at Rookery Bay). Connected through Jared, S1-2/S1-4 research run,
+    # responded to outreach with interest.
     # -----------------------------------------------------------------
     Fixture(
-        name="step2_simmer",
+        name="step2_simmer_marissa_rookery",
         description=(
-            "Initial research run (S1-4) done; contact has replied to "
-            "outreach. Should be Step 2-3, simmering, modest score."
+            "Marissa Figueroa, Rookery Bay Coastal Training Program "
+            "Coordinator. S1-2/S1-4 done, she replied with interest. "
+            "Should be Step 2-3, simmer/boil, modest score."
         ),
         context={
-            "contact_id":              "fixture-step2-simmer",
-            "municipality_name":       "Cedar Key",
+            "contact_id":              "ghl_rookery_marissa",
+            "municipality_name":       "Naples",
             "contact_record":          _contact_record(
-                contact_id="fixture-step2-simmer",
-                contact_name="Marcia Holloway",
-                first_name="Marcia",
-                last_name="Holloway",
-                email="mholloway@cedarkey.fl.gov",
-                municipality_name="Cedar Key",
-                city="Cedar Key",
-                tags=["intake-pending", "simmer"],
-                custom_fields={"contact_notes": "Asked good questions about seagrass restoration."},
-                contact_notes="Asked good questions about seagrass restoration.",
+                contact_id="ghl_rookery_marissa",
+                contact_name="Marissa Figueroa",
+                first_name="Marissa",
+                last_name="Figueroa",
+                email="marissa.figueroa@rookerybay.org",
+                company_name="Rookery Bay National Estuarine Research Reserve",
+                municipality_name="Naples",
+                city="Naples",
+                tags=["intake-pending", "simmer", "rookery-bay"],
+                custom_fields={
+                    "job_title": "Coastal Training Program Coordinator",
+                    "contact_notes": (
+                        "Connected through Jared. Specialty: outreach + training "
+                        "for the OFW designation watershed. Asked thoughtful "
+                        "questions about thin-layer mangrove placement methodology."
+                    ),
+                },
+                job_title="Coastal Training Program Coordinator",
+                contact_notes=(
+                    "Connected through Jared. Asked thoughtful questions about "
+                    "thin-layer mangrove placement methodology."
+                ),
             ),
             "agent_runs_summary": [
                 _run_summary("S1-4", days_ago=14, step=1,
-                             key_finding="20-year city manager; led last canal project."),
+                             key_finding="20+ years at Rookery Bay; runs the CTP outreach arm."),
                 _run_summary("S1-2", days_ago=12, step=1),
             ],
             "recent_communications": [
                 {
-                    "channel": "email", "direction": "inbound",
+                    "channel":   "email", "direction": "inbound",
                     "timestamp": "2026-05-20T16:00:00Z",
-                    "subject": "Re: C-HAWQ intro",
-                    "body": "Thanks for reaching out — would love to learn more about your work on seagrass.",
+                    "subject":   "Re: C-HAWQ — thin-layer placement work",
+                    "body": (
+                        "Thanks for the intro. The Marco Shores Lake work Jared "
+                        "described is exactly the kind of research-grade restoration "
+                        "the CTP is positioned to support. Would love to learn more."
+                    ),
                 }
             ],
             "ghl_pipeline_stage":      None,
@@ -195,53 +243,83 @@ FIXTURES: list[Fixture] = [
             "current_step_in":     [2, 3],
             "lead_heat_in":        ["simmer", "boil"],
             "lead_heat_score_min": 30,
-            "lead_heat_score_max": 75,
+            "lead_heat_score_max": 80,
         },
     ),
 
     # -----------------------------------------------------------------
-    # Step 4 ready to advance — Champion + commissioners confirmed
+    # Step 4 ready to advance — Jared at Rookery Bay. Full Step 3/4 stack
+    # done. Site walk confirmed with regulatory + reserve staff.
     # -----------------------------------------------------------------
     Fixture(
-        name="step4_ready",
+        name="step4_ready_jared_rookery",
         description=(
-            "S3-PREP, S4-LETTER, and PA-STEP4 all done. Champion has "
-            "confirmed site walk with two commissioners. Should be boil, "
-            "high score, ready_to_advance=True."
+            "Jared, Director of Rookery Bay NERR. S3-PREP + S4-LETTER + "
+            "PA-STEP4 all done; site walk confirmed for the Marco Shores "
+            "Lake / Shell Island Road review. Should be boil, high score, "
+            "ready_to_advance=True."
         ),
         context={
-            "contact_id":              "fixture-step4-ready",
+            "contact_id":              "ghl_rookery_jared",
             "municipality_name":       "Naples",
             "contact_record":          _contact_record(
-                contact_id="fixture-step4-ready",
-                contact_name="Jared Reynolds",
+                contact_id="ghl_rookery_jared",
+                contact_name="Jared",
                 first_name="Jared",
-                last_name="Reynolds",
-                email="jreynolds@rookerybay.org",
-                company_name="Rookery Bay NERR",
+                last_name=None,
+                email="jared@rookerybay.org",
+                company_name="Rookery Bay National Estuarine Research Reserve",
                 municipality_name="Naples",
-                tags=["boil", "champion-confirmed", "step4-prep-done"],
+                city="Naples",
+                tags=["boil", "champion-confirmed", "step4-prep-done", "rookery-bay"],
                 custom_fields={
                     "job_title": "Director, Rookery Bay NERR",
-                    "contact_notes": "Champion confirmed June 12 site walk; bringing two commissioners.",
+                    "contact_notes": (
+                        "Champion for Marco Shores Lake fish passage and Shell "
+                        "Island Road hydrological restoration. Site walk confirmed "
+                        "with reserve staff + USACE regulatory liaison. Reserve "
+                        "manages 110,000 acres under State Lands sublease; "
+                        "Outstanding Florida Waters designation applies."
+                    ),
                 },
                 job_title="Director, Rookery Bay NERR",
-                contact_notes="Champion confirmed June 12 site walk; bringing two commissioners.",
+                contact_notes=(
+                    "Champion for Marco Shores Lake fish passage and Shell Island "
+                    "Road hydrological restoration. Site walk confirmed."
+                ),
             ),
             "agent_runs_summary": [
                 _run_summary("S3-PREP",  days_ago=30, step=3,
-                             key_finding="Strong intake; Boil scorecard 17/21."),
+                             key_finding="Strong intake; Boil scorecard 17/21. Marco Shores Lake P3 fit."),
                 _run_summary("S4-LETTER", days_ago=20, step=4,
                              key_finding="Personalized letter sent; thank-you reply received."),
                 _run_summary("PA-STEP4", days_ago=4, step=4,
-                             key_finding="Site walk presentation ready for June 12."),
+                             key_finding="Site walk deck ready: Marco Shores + Shell Island Road."),
             ],
             "recent_communications": [
                 {
-                    "channel": "email", "direction": "inbound",
+                    "channel":   "email", "direction": "inbound",
                     "timestamp": "2026-05-22T14:00:00Z",
-                    "subject": "Re: site walk",
-                    "body": "Confirmed June 12, 10am. Bringing Commissioner Diaz and Commissioner Wells.",
+                    "subject":   "Re: site walk — Marco Shores + Shell Island",
+                    "body": (
+                        "Confirmed for June 12, 10am at the reserve. Bringing "
+                        "Marissa from CTP and Nick from regulatory. Ashley at "
+                        "USACE Fort Myers said she'd join for the dredge-spoil "
+                        "placement portion."
+                    ),
+                    "author":  "jared@rookerybay.org",
+                },
+                {
+                    "channel":   "voice_transcript", "direction": "internal",
+                    "timestamp": "2026-05-18T15:30:00Z",
+                    "subject":   "Plaud — Rookery Bay reserve walkthrough",
+                    "body": (
+                        "Chris and Jared walked through the OFW designation impact "
+                        "on placement options. Jared receptive to the thin-layer "
+                        "mangrove placement pilot; willing to host academic "
+                        "monitoring (UF/IFAS) for the methodology paper."
+                    ),
+                    "author":  "Emily",
                 },
             ],
             "ghl_pipeline_stage":      "Project Pipeline / Step 4 — Schedule",
@@ -257,44 +335,66 @@ FIXTURES: list[Fixture] = [
     ),
 
     # -----------------------------------------------------------------
-    # Step 7 mobilized — project placed, funding underway
+    # Step 7 mobilized — Jared, same project, months later. Project
+    # placed with NOAA + FL ORCP, commission packet in motion.
     # -----------------------------------------------------------------
     Fixture(
-        name="step7_mobilized",
+        name="step7_mobilized_rookery_p3",
         description=(
-            "Project placed (S7-PLAN), commission resolution in flight "
-            "(S8-x). Should land at Step 7-8, boil, very high score."
+            "Same Jared / Rookery Bay project, months further along. "
+            "S5/S6/S7-PLAN done; NOAA + FL ORCP package submitted, "
+            "USACE coordination underway. Should be Step 6-8, boil, "
+            "very high score."
         ),
         context={
-            "contact_id":              "fixture-step7",
-            "municipality_name":       "Tallahassee",
+            "contact_id":              "ghl_rookery_jared",
+            "municipality_name":       "Naples",
             "contact_record":          _contact_record(
-                contact_id="fixture-step7",
-                contact_name="Dr. Lena Park",
-                first_name="Lena",
-                last_name="Park",
-                email="lpark@talgov.com",
-                municipality_name="Tallahassee",
-                tags=["boil", "p3-active", "commission-prep"],
-                custom_fields={"job_title": "Director of Sustainability"},
-                job_title="Director of Sustainability",
+                contact_id="ghl_rookery_jared",
+                contact_name="Jared",
+                first_name="Jared",
+                last_name=None,
+                email="jared@rookerybay.org",
+                company_name="Rookery Bay National Estuarine Research Reserve",
+                municipality_name="Naples",
+                city="Naples",
+                tags=["boil", "p3-active", "commission-prep", "rookery-bay"],
+                custom_fields={
+                    "job_title": "Director, Rookery Bay NERR",
+                    "contact_notes": (
+                        "Rookery Bay NERR Coastal Restoration Partnership placed. "
+                        "$9M project: Marco Shores Lake fish passage + Shell Island "
+                        "Road boardwalk + USACE ICW dredge thin-layer placement. "
+                        "Friends of Rookery Bay = grant applicant of record; "
+                        "C-HAWQ = P3 administrator."
+                    ),
+                },
+                job_title="Director, Rookery Bay NERR",
+                contact_notes="Rookery Bay NERR Coastal Restoration Partnership placed.",
             ),
             "agent_runs_summary": [
-                _run_summary("S3-PREP",  days_ago=90, step=3),
-                _run_summary("S4-LETTER", days_ago=80, step=4),
-                _run_summary("S5-1",     days_ago=70, step=5,
-                             key_finding="Internal coalition built; staff signed off."),
-                _run_summary("S6-1",     days_ago=55, step=6,
-                             key_finding="Project package finalized."),
-                _run_summary("S7-PLAN",  days_ago=30, step=7,
-                             key_finding="Project placed with city; awaiting commission vote."),
+                _run_summary("S3-PREP",   days_ago=110, step=3),
+                _run_summary("S4-LETTER", days_ago=100, step=4),
+                _run_summary("S5-1",      days_ago=85,  step=5,
+                             key_finding="Friends of Rookery Bay confirmed as fiscal executor."),
+                _run_summary("S5-2",      days_ago=80,  step=5,
+                             key_finding="Reserve coalition: Marissa, Rachel, Nick all signed off."),
+                _run_summary("S6-1",      days_ago=60,  step=6,
+                             key_finding="Project package finalized; $6M NOAA + $3M C-HAWQ match."),
+                _run_summary("S7-PLAN",   days_ago=30,  step=7,
+                             key_finding="Project placed with NOAA NERR Program + FL ORCP."),
             ],
             "recent_communications": [
                 {
-                    "channel": "email", "direction": "outbound",
+                    "channel":   "email", "direction": "outbound",
                     "timestamp": "2026-05-23T19:00:00Z",
-                    "subject": "Commission packet sent",
-                    "body": "Sent the commission packet for the 6/4 agenda. Champion confirmed sponsorship.",
+                    "subject":   "Commission packet — Marco Shores P3",
+                    "body": (
+                        "Sent the commission packet for the 6/4 agenda. Sponsorship "
+                        "confirmed by Commissioner Wells. Sublease amendment with "
+                        "FL ORCP is the long pole."
+                    ),
+                    "author":  "logan@chawq.org",
                 },
             ],
             "ghl_pipeline_stage":      "Project Pipeline / Step 7 — Placed",
@@ -309,33 +409,47 @@ FIXTURES: list[Fixture] = [
     ),
 
     # -----------------------------------------------------------------
-    # Stalled — was warm, gone dark for 90+ days
+    # Stalled — Rachel Schneberger (Rookery Bay Community Monitoring
+    # Specialist). Was warm at intake; gone dark 95 days.
     # -----------------------------------------------------------------
     Fixture(
-        name="stalled_lead",
+        name="stalled_rachel_rookery",
         description=(
-            "S3-PREP done, S4 attempted, no signal in 95 days. Should "
-            "be tagged stall (or cold), low confidence on advancement, "
-            "ready_to_advance=False."
+            "Rachel Schneberger, Rookery Bay Community Monitoring "
+            "Specialist. S3-PREP done, S4-LETTER sent, no reply in 95 "
+            "days. Should land at stall/cold heat, ready_to_advance=False."
         ),
         context={
-            "contact_id":              "fixture-stalled",
-            "municipality_name":       "Sarasota",
+            "contact_id":              "ghl_rookery_rachel",
+            "municipality_name":       "Naples",
             "contact_record":          _contact_record(
-                contact_id="fixture-stalled",
-                contact_name="Tom Rivers",
-                first_name="Tom",
-                last_name="Rivers",
-                email="trivers@sarasota.gov",
-                municipality_name="Sarasota",
-                tags=["stall", "follow-up-needed"],
-                custom_fields={"contact_notes": "Went quiet after intake; rumored to be reorging."},
-                contact_notes="Went quiet after intake; rumored to be reorging.",
+                contact_id="ghl_rookery_rachel",
+                contact_name="Rachel Schneberger",
+                first_name="Rachel",
+                last_name="Schneberger",
+                email="rachel.schneberger@rookerybay.org",
+                company_name="Rookery Bay National Estuarine Research Reserve",
+                municipality_name="Naples",
+                city="Naples",
+                tags=["stall", "follow-up-needed", "rookery-bay"],
+                custom_fields={
+                    "job_title": "Community Monitoring Specialist",
+                    "contact_notes": (
+                        "Initially engaged on the Marco Shores citizen-science "
+                        "monitoring plan. Went quiet after intake; rumored to be "
+                        "reassigned to the Ten Thousand Islands monitoring rollout."
+                    ),
+                },
+                job_title="Community Monitoring Specialist",
+                contact_notes=(
+                    "Initially engaged on Marco Shores citizen-science monitoring. "
+                    "Went quiet after intake."
+                ),
             ),
             "agent_runs_summary": [
                 _run_summary("S3-PREP",  days_ago=105, step=3),
-                _run_summary("S4-LETTER", days_ago=95, step=4,
-                             key_finding="Letter sent; no response."),
+                _run_summary("S4-LETTER", days_ago=95,  step=4,
+                             key_finding="Letter sent referencing citizen-science role; no response."),
             ],
             "recent_communications":   None,
             "ghl_pipeline_stage":      "Project Pipeline / Step 4 — Schedule",
