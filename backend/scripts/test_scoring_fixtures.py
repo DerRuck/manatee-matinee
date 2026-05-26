@@ -36,6 +36,13 @@ Run from backend/:
     # Save validated outputs for diff vs. a future run
     python scripts/test_scoring_fixtures.py --save-dir /tmp/scoring_baseline
 
+    # Render docx locally so you can eyeball the formatted output
+    python scripts/test_scoring_fixtures.py --save-docx-dir /tmp/scoring_docx
+
+    # Upload each fixture's docx to Drive — use a sandbox folder so the
+    # real contact tree doesn't get fixture results mixed in
+    python scripts/test_scoring_fixtures.py --drive --drive-folder 1abc...
+
     # Try a different model
     python scripts/test_scoring_fixtures.py --model claude-opus-4-7
 
@@ -359,6 +366,9 @@ class CheckResult:
     actual:         dict[str, Any]
     failures:       list[str]
     error:          str | None = None
+    # Carried so the CLI can upload to Drive without re-running the agent.
+    result:         Any = None
+    drive_link:     str | None = None
 
 
 def _check_expectations(actual: dict[str, Any], expected: dict[str, Any]) -> list[str]:
@@ -458,6 +468,7 @@ def run_one(fixture: Fixture, model: str | None, verbose: bool) -> CheckResult:
         output_tokens=meta["output_tokens"],
         actual=actual,
         failures=failures,
+        result=result,
     )
 
 
@@ -477,6 +488,12 @@ def main() -> None:
                     help="Override the model in the YAML (e.g. claude-opus-4-7).")
     ap.add_argument("--save-dir", metavar="DIR",
                     help="Save each fixture's actual values as JSON for diffing.")
+    ap.add_argument("--save-docx-dir", metavar="DIR",
+                    help="Render each fixture's docx locally and write to this directory.")
+    ap.add_argument("--drive", action="store_true",
+                    help="Upload each rendered docx + JSON to Drive (fixture contacts only).")
+    ap.add_argument("--drive-folder", metavar="FOLDER_ID",
+                    help="Override the Drive root folder. Useful for sandboxing fixture runs.")
     ap.add_argument("--stop-on-fail", action="store_true",
                     help="Halt on first failure.")
     ap.add_argument("--verbose", action="store_true",
@@ -495,6 +512,10 @@ def main() -> None:
     save_dir = Path(args.save_dir) if args.save_dir else None
     if save_dir:
         save_dir.mkdir(parents=True, exist_ok=True)
+
+    save_docx_dir = Path(args.save_docx_dir) if args.save_docx_dir else None
+    if save_docx_dir:
+        save_docx_dir.mkdir(parents=True, exist_ok=True)
 
     selected = FIXTURES
     if args.fixture:
@@ -533,6 +554,27 @@ def main() -> None:
                 encoding="utf-8",
             )
 
+        # Optional artifact outputs — only when the agent actually returned a
+        # validated result. Failures (parse / validation errors) skip these.
+        if r.result is not None and save_docx_dir:
+            try:
+                from services.scoring_agent.drive_sync import filename_for, render_docx
+                docx_bytes = render_docx(r.result)
+                (save_docx_dir / filename_for(r.result, "docx")).write_bytes(docx_bytes)
+            except Exception as exc:
+                print(f"\n  WARN ({fixture.name}): local docx render failed: {exc}")
+
+        if r.result is not None and args.drive:
+            try:
+                from services.scoring_agent.drive_sync import (
+                    DEFAULT_FOLDER_ID, upload_score,
+                )
+                target = args.drive_folder or DEFAULT_FOLDER_ID
+                files = upload_score(r.result, folder_id=target)
+                r.drive_link = files.get("docx", {}).get("webViewLink")
+            except Exception as exc:
+                print(f"\n  WARN ({fixture.name}): Drive upload failed: {exc}")
+
         status = "PASS" if r.passed else "FAIL"
         if r.error:
             print(
@@ -553,6 +595,8 @@ def main() -> None:
         )
         for fail in r.failures:
             print(f"      ✗ {fail}")
+        if r.drive_link:
+            print(f"      drive: {r.drive_link}")
         if not r.passed and args.stop_on_fail:
             break
 
