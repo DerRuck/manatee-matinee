@@ -229,7 +229,7 @@ def list_folder_files(
     return files
 
 
-def get_file_metadata(file_id: str) -> dict[str, Any]:
+def get_file_metadata(file_id: str) -> dict[str, Any] | None:
     """
     Fetch a single file's metadata.
 
@@ -238,14 +238,65 @@ def get_file_metadata(file_id: str) -> dict[str, Any]:
     parents) plus `size`, so the result drops cleanly into any code path
     that already understands walker output. `size` is needed by the
     iflytek resolver to skip 0-byte sidecars.
+
+    Returns None if the file no longer exists (HTTP 404). Other API errors
+    propagate -- callers that need finer control can wrap.
+    """
+    from googleapiclient.errors import HttpError
+
+    service = _get_drive_service()
+    try:
+        return (
+            service.files()
+            .get(
+                fileId=file_id,
+                fields="id, name, mimeType, modifiedTime, webViewLink, parents, size",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+    except HttpError as e:
+        if getattr(e.resp, "status", None) == 404:
+            return None
+        raise
+
+
+def get_drive_start_page_token() -> str:
+    """
+    Return Drive's current `startPageToken` -- the cursor for changes.list().
+    Used to initialize drive_watch_state on first deploy, before any push
+    event has arrived.
+    """
+    service = _get_drive_service()
+    resp = service.changes().getStartPageToken(supportsAllDrives=True).execute()
+    return resp["startPageToken"]
+
+
+def list_drive_changes(page_token: str) -> dict[str, Any]:
+    """
+    Pull one page of Drive changes since `page_token`.
+
+    Returns the raw Drive `changes.list` response. Callers look at:
+      - `changes`: array of {fileId, file: {...}, removed: bool, ...}
+      - `nextPageToken`: present if more pages remain; pass to next call
+      - `newStartPageToken`: present on the LAST page; persist as the new
+        watch state cursor so the next webhook starts from here
+
+    Fields requested keep payload small while including what the
+    orchestrator needs (id, name, mimeType, parents, modifiedTime).
     """
     service = _get_drive_service()
     return (
-        service.files()
-        .get(
-            fileId=file_id,
-            fields="id, name, mimeType, modifiedTime, webViewLink, parents, size",
+        service.changes()
+        .list(
+            pageToken=page_token,
+            fields=(
+                "newStartPageToken, nextPageToken, "
+                "changes(fileId, removed, file(id, name, mimeType, parents, modifiedTime))"
+            ),
+            includeRemoved=True,
             supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
         )
         .execute()
     )
@@ -469,7 +520,7 @@ def _pdf_bytes_to_text(data: bytes) -> str | None:
             parts.append(text)
 
     if not parts:
-        # Native PDF text extraction returned nothing — likely scanned.
+        # Native PDF text extraction returned nothing -- likely scanned.
         # OCR is a separate decision (out of V1 scope).
         return None
 
@@ -482,9 +533,8 @@ def _docx_bytes_to_text(data: bytes) -> str:
 
     Pulls paragraph text and table cells in document order. Skips empty
     paragraphs and trims whitespace; doesn't attempt to preserve formatting,
-    images, comments, or footnotes — none of those help embedding quality.
+    images, comments, or footnotes -- none of those help embedding quality.
     """
-    # Lazy import: python-docx is only needed when we hit a .docx file.
     from docx import Document as DocxDocument  # type: ignore
 
     doc = DocxDocument(io.BytesIO(data))
@@ -511,8 +561,8 @@ class DriveClient:
         self._service = None
 
     async def register_watch(self, folder_id: str, webhook_url: str) -> dict:
-        """POST /files/{fileId}/watch — register a push notification channel."""
-        raise NotImplementedError("Drive watch registration — Sprint 2 task.")
+        """POST /files/{fileId}/watch -- register a push notification channel."""
+        raise NotImplementedError("Drive watch registration -- Sprint 2 task.")
 
     async def mirror_file(
         self,
@@ -521,4 +571,4 @@ class DriveClient:
         filename: str,
     ) -> str:
         """Upload a local file to the target Drive folder. Returns Drive file ID."""
-        raise NotImplementedError("Drive mirror write — Sprint 3 one-way sync task.")
+        raise NotImplementedError("Drive mirror write -- Sprint 3 one-way sync task.")

@@ -28,7 +28,16 @@ from typing import Any, Callable
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
 from core.settings import get_settings
+from ingestion import ingest_one_drive_file
+from services.drive.client import (
+    get_drive_start_page_token,
+    list_drive_changes,
+)
 from services.email_drafter_runner import run_email_drafter_for_ghl_payload
+from services.firestore.client import (
+    get_drive_watch_state,
+    set_drive_watch_state,
+)
 # Restored when feat/research-agent merges to dev (carries the research_agent module).
 # Commented out on feat/agent-runs so the app boots without that module present.
 # from services.research_agent.research_ import run_research_agent_for_ghl_payload
@@ -134,12 +143,63 @@ async def drive_webhook(
         )
         return {"status": "accepted", "event": "sync"}
 
-    # TODO: validate x_goog_channel_token against the expected shared secret.
-    # TODO: validate x_goog_channel_id against stored watch channels in Firestore.
-    # TODO: enqueue ingestion task.
-    # background_tasks.add_task(ingest_drive_resource, x_goog_resource_id)
+    # Resolve the watch state cursor. First push after deploy initializes it
+    # via Drive's startPageToken so we don't try to walk all-of-history.
+    state = get_drive_watch_state()
+    page_token = state.get("page_token") if state else None
+    if not page_token:
+        page_token = get_drive_start_page_token()
+        logger.info(
+            "drive webhook: initialized watch state cursor",
+            extra={"page_token": page_token},
+        )
 
-    return {"status": "accepted", "event": x_goog_resource_state}
+    # Walk all pages of changes since the last cursor. Dispatch each
+    # changed file_id to the orchestrator as a background task so the
+    # webhook returns 202 immediately and ingestion happens out-of-band.
+    dispatched = 0
+    next_page_token = page_token
+    while next_page_token:
+        resp = list_drive_changes(next_page_token)
+        for change in resp.get("changes", []):
+            file_id = change.get("fileId")
+            if not file_id:
+                continue
+            if change.get("removed"):
+                # File was deleted in Drive. V1 leaves the documents/chunks
+                # rows in place; cleanup is a separate concern. Log so the
+                # divergence is visible.
+                logger.info(
+                    "drive webhook: file removed in Drive, leaving Firestore rows",
+                    extra={"file_id": file_id},
+                )
+                continue
+            background_tasks.add_task(ingest_one_drive_file, file_id)
+            dispatched += 1
+
+        # Advance the cursor. On the final page Drive sends newStartPageToken;
+        # earlier pages send nextPageToken.
+        next_page_token = resp.get("nextPageToken")
+        if not next_page_token:
+            new_start = resp.get("newStartPageToken")
+            if new_start:
+                set_drive_watch_state(
+                    new_start,
+                    channel_id=x_goog_channel_id,
+                    resource_id=x_goog_resource_id,
+                )
+            break
+
+    logger.info(
+        "drive webhook: dispatched %d ingest task(s)",
+        dispatched,
+        extra={"event": x_goog_resource_state},
+    )
+    return {
+        "status": "accepted",
+        "event": x_goog_resource_state,
+        "dispatched": dispatched,
+    }
 
 
 # -------------------- GoHighLevel --------------------

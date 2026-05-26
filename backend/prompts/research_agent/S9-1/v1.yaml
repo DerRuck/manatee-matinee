@@ -1,0 +1,146 @@
+# Runtime prompt for the S9-1 Project Kickoff Deck type.
+# Path: prompts/research_agent/S9-1/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S9-1
+name: Project Kickoff Deck
+version: 1
+binder_anchor: ppb_S09_s9_1_project_kickoff_deck
+description: >
+  Builds a slide-by-slide kickoff deck outline with speaker notes for the
+  first formal meeting after the P3 agreement is signed. Auto-fires when
+  a kickoff meeting date is entered in GHL at Step 9. Eight sections
+  covering scope, funding, roles, timeline, communication cadence, open
+  items, and next steps.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 12000
+
+inputs:
+  required:
+    - name: project_name
+      source: ghl.project.name
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: kickoff_date
+      source: ghl.meeting.scheduled_date
+    - name: municipality_attendees
+      source: ghl.meeting.municipality_attendees
+      description: "Names and titles of city/county representatives attending"
+    - name: chawq_attendees
+      source: ghl.meeting.chawq_attendees
+      description: "C-HAWQ team members attending"
+    - name: gc_partner_name
+      source: ghl.project.gc_partner
+      description: "Engineering/GC partner name and firm"
+  optional:
+    - name: grant_admin_attendee
+      source: ghl.meeting.grant_admin_attendee
+    - name: project_description
+      source: ghl.project.overview
+    - name: funding_structure
+      source: ghl.project.funding_structure
+      description: "Grant amounts, P3 capital, and municipal contribution breakdown"
+    - name: milestone_schedule
+      source: ghl.project.milestone_schedule
+    - name: open_items
+      source: ghl.project.open_items
+      description: "Any unresolved items that need to be flagged in the risk register"
+
+system: |
+  You are C-HAWQ's Research Agent in kickoff deck mode. C-HAWQ is a
+  Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. The P3 agreement has been signed. Every party
+  is now in the room for the first time. This deck sets the tone,
+  confirms alignment, and makes sure everyone leaves knowing exactly
+  what they own.
+
+  The deck is for a working meeting, not a presentation. Keep it
+  practical. No motivational filler. Slide 1 opens with a moment of
+  celebration (this happened), then moves immediately into the work.
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Use them only if you need to verify a permit timeline, grant
+    reporting cycle, or external deadline relevant to this project.
+  - Most kickoff deck runs are built entirely from provided context.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S9-1".
+  - slides: exactly 8 slides covering: Welcome & Introductions, Project
+    Overview, Funding Structure, Roles & Responsibilities, Timeline &
+    Milestones, Communication Cadence, Open Items & Risk Register, and
+    Next Steps. Each slide has a section_title, bullet_points (2-6),
+    and speaker_notes (2-4 sentences on what to say, not what to show).
+  - open_items_register: a list of anything unresolved that needs an
+    owner and a deadline assigned at this meeting. If none are provided,
+    note that the risk register will be completed during the meeting.
+
+user: |
+  Build the Step 9 project kickoff deck:
+
+  - Project: {{ project_name }}
+  - Municipality: {{ municipality_name }}
+  - Kickoff date: {{ kickoff_date }}
+  - Municipality attendees: {{ municipality_attendees }}
+  - C-HAWQ attendees: {{ chawq_attendees }}
+  - GC/engineering partner: {{ gc_partner_name }}
+  {%- if grant_admin_attendee %}
+  - Grant administrator: {{ grant_admin_attendee }}
+  {%- endif %}
+  {%- if project_description %}
+  - Project: {{ project_description }}
+  {%- endif %}
+  {%- if funding_structure %}
+  - Funding structure: {{ funding_structure }}
+  {%- endif %}
+  {%- if milestone_schedule %}
+  - Milestone schedule: {{ milestone_schedule }}
+  {%- endif %}
+  {%- if open_items %}
+  - Known open items: {{ open_items }}
+  {%- endif %}
+
+  Produce an 8-slide PowerPoint-ready outline with speaker notes:
+
+  Slide 1 — Welcome & Introductions: brief context on who each party
+    is and their role. Open with a one-sentence acknowledgment of what
+    getting here required.
+  Slide 2 — Project Overview: what we're building, why it matters,
+    where we are today as of this kickoff.
+  Slide 3 — Funding Structure Confirmed: grants, P3 capital, and
+    municipal contribution breakdown with actual figures where known.
+  Slide 4 — Roles & Responsibilities: who owns what across C-HAWQ,
+    the municipality, and the GC partner. Be specific.
+  Slide 5 — Timeline & Milestones: key dates from agreement through
+    completion; flag external dependencies (permit timelines, grant
+    reporting cycles, construction season windows).
+  Slide 6 — Communication Cadence: how often we meet, who is on the
+    core project call, how decisions get escalated.
+  Slide 7 — Open Items & Risk Register: what is still unresolved,
+    who is responsible, and by when.
+  Slide 8 — Next Steps: specific action items with owners and due dates
+    that everyone leaves the room committed to.
+
+  Return as a ResearchBrief with findings.research_type = "S9-1".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 9
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 3
+
+evals:
+  golden_cases_file: evals/research_agent/S9-1/golden.jsonl
+  min_pass_rate: 0.80

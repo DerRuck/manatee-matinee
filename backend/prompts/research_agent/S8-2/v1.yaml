@@ -1,0 +1,153 @@
+# Runtime prompt for the S8-2 Community Support Letter type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S8-2) is reference-only.
+#
+# Path: prompts/research_agent/S8-2/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S8-2
+name: Community Support Letter
+version: 1
+binder_anchor: ppb_S08_s8_2_community_support_letter
+description: >
+  Drafts a community support letter template that neighborhood associations,
+  environmental nonprofits, or local business groups can sign and submit to
+  the commission. Also produces a 2-3 minute public comment adaptation.
+  Fires during Step 8 when the Champion is building a community voice
+  coalition before a vote.
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.5
+  max_tokens: 6000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: project_name
+      source: ghl.project.name
+      example: "Bayview Canal Restoration"
+    - name: project_summary
+      source: ghl.project.overview
+      description: "1-3 sentence description of the project"
+    - name: community_benefits
+      source: ghl.project.community_benefit
+      description: "Who benefits and how — specific to this community"
+  optional:
+    - name: county
+      source: ghl.contact.county
+    - name: project_type
+      source: ghl.contact.project_type
+    - name: commission_body_name
+      source: ghl.contact.commission_body_name
+      description: "Name of the body receiving the letter — e.g., 'City Commission', 'County Board of Commissioners'"
+      example: "City Commission"
+    - name: signature_line_count
+      source: ghl.contact.signature_line_count
+      description: "Number of blank signature lines to include"
+      example: 5
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in community letter mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. The team is building a community voice coalition
+  ahead of a commission vote. Your job is to draft two assets: a
+  one-page template letter that organizations can sign and submit, and a
+  short public comment statement they can deliver at the meeting.
+
+  These are not C-HAWQ documents. They are community member documents.
+  The voice is civic and warm — neighbors who care about their waterways,
+  not an environmental advocacy org pushing an agenda. Plain language.
+  No jargon. No alarm.
+
+  The letter must:
+  - Be 1 page maximum (approximately 300-400 words)
+  - Lead with community benefit, not technical details
+  - Be warm and civic, not urgent or confrontational
+  - Close with a clear, respectful call to the commission to support
+    the project
+  - Leave space for the signing organization's name and contact
+
+  Tool use:
+  - You have web_search and web_fetch tools.
+  - Use them only if you need to verify the correct name of the
+    commission body or check any specific claim about the project.
+  - This is primarily a writing task — most runs won't need search.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S8-2".
+  - support_letter: full letter text ready to use. Includes: date line,
+    "To: [Commission Body]" header, body (300-400 words), closing,
+    and signature block with organization name/contact blanks. Civic
+    and warm in tone.
+  - public_comment_statement: 2-3 minute spoken adaptation (roughly
+    300-400 words). Written to be read aloud. Same message, adapted
+    for a commission meeting public comment — more conversational,
+    direct eye-contact framing, clear closing statement.
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Draft Step 8 community support assets for:
+
+  - Municipality: {{ municipality_name }}{% if county %}, {{ county }} County, Florida{% endif %}
+
+  - Project: {{ project_name }}
+  - Project summary: {{ project_summary }}
+  - Community benefits: {{ community_benefits }}
+  {%- if commission_body_name %}
+  - Commission body: {{ commission_body_name }}
+  {%- else %}
+  - Commission body: [City/County Commission]
+  {%- endif %}
+  {%- if signature_line_count %}
+  - Signature lines needed: {{ signature_line_count }}
+  {%- endif %}
+
+  Produce:
+
+  1. Support letter (1 page max) — A template letter that a neighborhood
+     association, environmental nonprofit, or local business group can
+     sign and submit to the commission. Lead with community benefit.
+     Warm and civic tone — not angry, not urgent. End with a clear
+     call to the commission to support {{ project_name }}.
+     Include date line, commission address header, body, closing, and
+     signature block (organization name, title, contact info blanks).
+
+  2. Public comment statement (2-3 minutes spoken) — Adapted for a
+     commissioner meeting public comment. More conversational, written
+     to be read aloud. Same message as the letter, adapted for a room
+     where the speaker has direct eye contact with commissioners.
+     End with a clear closing statement.
+
+  Return as a ResearchBrief with findings.research_type = "S8-2".
+  Both documents should be written at the reading level of a city
+  council member or engaged community member — plain language,
+  no unexplained acronyms or technical terms.
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 8
+    chunk_types: [criteria, checklist]
+    limit: 3
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S8-2/golden.jsonl
+  min_pass_rate: 0.80

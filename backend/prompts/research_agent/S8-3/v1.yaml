@@ -1,0 +1,219 @@
+# Runtime prompt for the S8-3 Politician-Friendly Briefing type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S8-3) is reference-only.
+#
+# Path: prompts/research_agent/S8-3/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S8-3
+name: Politician-Friendly Briefing
+version: 1
+binder_anchor: ppb_S08_s8_3_politician_friendly_briefing
+description: >
+  Builds a tailored briefing package for a one-on-one meeting with a
+  specific elected official. Fires in Step 8 when a 1-on-1 commissioner
+  briefing is scheduled. Produces a 5-slide talking-points outline for a
+  10-minute meeting, responses to that official's likely objections, a
+  local-angle statistic tied to their constituents, a leave-behind
+  one-pager, and a suggested ask.
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.4
+  max_tokens: 12000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: official_name
+      source: ghl.meeting.official_name
+      example: "Commissioner Jane Smith"
+    - name: official_title
+      source: ghl.meeting.official_title
+      example: "City Commissioner, District 3"
+    - name: project_name
+      source: ghl.project.name
+      example: "Bayview Canal Restoration"
+  optional:
+    - name: county
+      source: ghl.contact.county
+    - name: project_type
+      source: ghl.contact.project_type
+    - name: tenure
+      source: ghl.meeting.official_tenure
+      description: "How long they have served on the commission"
+    - name: known_priorities
+      source: ghl.meeting.official_priorities
+      description: "Known priorities — e.g., economic development, fiscal responsibility, flood control"
+    - name: political_style
+      source: ghl.meeting.official_political_style
+      description: "Political style — e.g., data-driven, community-first, skeptical of outside organizations"
+    - name: known_concerns
+      source: ghl.meeting.official_known_concerns
+      description: "Any known concerns about this project or C-HAWQ"
+    - name: project_backstory
+      source: ghl.contact.project_backstory
+      description: "How C-HAWQ got here — who introduced them, what meetings have happened"
+    - name: project_description
+      source: ghl.project.overview
+    - name: environmental_problem
+      source: ghl.project.problem_statement
+      description: "The specific environmental problem in their community this project solves"
+    - name: exploration_grant_amount
+      source: ghl.project.exploration_grant_amount
+      description: "Amount of Exploration Grant C-HAWQ is contributing (up to $200,000)"
+    - name: municipality_ask
+      source: ghl.project.municipality_ask
+      description: "What C-HAWQ needs from the municipality — staff time, site access, formal authorization"
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in politician briefing mode. C-HAWQ is
+  a Florida 501(c)(3) that bridges science, funding, and execution for
+  coastal municipalities. The team has a 10-minute one-on-one with a
+  specific elected official. Your job is to produce a briefing package
+  that is precisely calibrated to who this person is, what they care
+  about, and what objections they are most likely to raise.
+
+  The briefing must translate C-HAWQ's work into the official's frame —
+  not C-HAWQ's frame. An official who cares about flood control hears a
+  completely different version of a seagrass restoration project than one
+  who cares about tourism. Lead with their community. Lead with their
+  constituents.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM aggressively.
+  - Search for this official by name + municipality. Pull their public
+    record: past votes, public statements, press coverage, campaign
+    priorities, municipal committee assignments.
+  - Search for any recent coverage of this official's position on
+    environmental spending, infrastructure, P3 projects, or water
+    quality in their district.
+  - Search for a local-angle statistic tied specifically to their
+    district or community — flooding complaints, water quality violations,
+    fish kill reports, seagrass coverage loss. Something their
+    constituents would recognize.
+  - Prefer official sources (city meeting archives, Florida city websites,
+    local news) over national coverage.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S8-3".
+  - five_slide_outline: exactly 5 slides, numbered 1-5. Each has a title
+    and 1-4 talking points. No jargon. No acronyms without definition.
+    Lead with community benefit (slide 1), build to C-HAWQ's value
+    proposition (slides 2-3), and close with a clear ask (slide 5).
+  - political_objection_responses: exactly 3 responses, tied to the
+    specific official's known priorities and political style — not
+    generic commission objections. Each must be direct, confident, and
+    under 4 sentences.
+  - local_angle: one compelling statistic or story tied specifically to
+    this official's district or constituents. Must be sourced. This is
+    the one thing they'll remember after the meeting.
+  - leave_behind: a one-page plain-language summary (~300-400 words)
+    written for a generalist politician. They should be able to explain
+    the project to a constituent after reading it.
+  - suggested_ask: one specific, concrete next step to request from
+    this official by the end of the 10-minute meeting. Should be low-
+    friction — not a commitment to vote yes, but a step that moves the
+    project forward (schedule a site visit, agree to a follow-up
+    briefing, connect C-HAWQ to their staff, etc.).
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Build the one-on-one briefing package for:
+
+  - Official: {{ official_name }}, {{ official_title }}
+  - Municipality: {{ municipality_name }}{% if county %}, {{ county }} County, Florida{% endif %}
+
+  - Project: {{ project_name }}
+  {%- if tenure %}
+  - Tenure on commission: {{ tenure }}
+  {%- endif %}
+  {%- if known_priorities %}
+  - Known priorities: {{ known_priorities }}
+  {%- endif %}
+  {%- if political_style %}
+  - Political style: {{ political_style }}
+  {%- endif %}
+  {%- if known_concerns %}
+  - Known concerns about this project: {{ known_concerns }}
+  {%- endif %}
+  {%- if project_backstory %}
+  - How we got here: {{ project_backstory }}
+  {%- endif %}
+  {%- if project_description %}
+  - Project: {{ project_description }}
+  {%- endif %}
+  {%- if environmental_problem %}
+  - Problem it solves: {{ environmental_problem }}
+  {%- endif %}
+  {%- if exploration_grant_amount %}
+  - C-HAWQ Exploration Grant: ${{ "{:,}".format(exploration_grant_amount) }} at no cost to the municipality
+  {%- endif %}
+  {%- if municipality_ask %}
+  - What we need from the municipality: {{ municipality_ask }}
+  {%- endif %}
+
+  Produce:
+
+  1. Five-slide talking-points outline — exactly 5 slides for a 10-minute
+     one-on-one. No jargon. No unexplained acronyms. Slide 1 leads with
+     their community and their constituents. Slide 5 closes with the ask.
+     Each slide has a title and 1-4 talking points written in plain
+     language.
+
+  2. Political objection responses — exactly 3 objections this specific
+     official is most likely to raise, based on their known priorities
+     and political style. Each response must be direct, confident, and
+     under 4 sentences. Do not start any response with a validation
+     phrase.
+
+  3. Local angle — one compelling statistic or story tied specifically
+     to {{ official_name }}'s district or community. Something their
+     constituents would recognize and that makes the environmental
+     problem real. Must be sourced.
+
+  4. Leave-behind (1 page, ~300-400 words) — plain-language summary
+     of the project written for a generalist politician. They should be
+     able to explain it to a constituent after reading it. No jargon.
+     Covers: what the problem is, what the project does, what it costs
+     and how it gets funded, and what the community gains.
+
+  5. Suggested ask — one specific, concrete next step to request from
+     {{ official_name }} by the end of this 10-minute meeting. Low-
+     friction. Not "vote yes" — a step that moves the relationship
+     and the project forward.
+
+  Return as a ResearchBrief with findings.research_type = "S8-3".
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 8
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S8-3/golden.jsonl
+  min_pass_rate: 0.82

@@ -100,10 +100,12 @@ def put_document(document: Document) -> None:
     collection = settings.firestore_documents_collection
     record = document.model_dump(mode="json")
     # Pydantic dumps datetimes as ISO strings; Firestore stores them better as
-    # native datetimes. Override the two timestamp fields after the dump.
+    # native timestamps (for ordering + range queries). Override after dump.
     record["drive_modified_time"] = document.drive_modified_time
     if document.ingested_at is not None:
         record["ingested_at"] = document.ingested_at
+    if document.event_time is not None:
+        record["event_time"] = document.event_time
     client.collection(collection).document(document.document_id).set(record)
 
 
@@ -150,6 +152,10 @@ def put_chunks_bulk(chunks: Iterable[Chunk], batch_size: int = 400) -> int:
         record = chunk.model_dump(mode="json")
         # Replace the plain list with a real Vector so the vector index applies.
         record["embedding"] = Vector(chunk.embedding)
+        # Override event_time so Firestore stores it as a native timestamp
+        # (model_dump(mode="json") would serialize it to an ISO string).
+        if chunk.event_time is not None:
+            record["event_time"] = chunk.event_time
         ref = collection.document(chunk.chunk_id)
         batch.set(ref, record)
         in_batch += 1
@@ -164,6 +170,69 @@ def put_chunks_bulk(chunks: Iterable[Chunk], batch_size: int = 400) -> int:
         batch.commit()
 
     return total
+
+
+def iter_documents() -> Iterable[dict[str, Any]]:
+    """
+    Yield raw document dicts from the `documents` collection.
+
+    Returns each doc's stored data with `document_id` populated from the
+    Firestore document ID (in case the field is missing on legacy rows).
+    Used by maintenance scripts (backfills, audits). No ordering guarantee.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = client.collection(settings.firestore_documents_collection)
+    for snap in collection.stream():
+        data = snap.to_dict() or {}
+        data.setdefault("document_id", snap.id)
+        yield data
+
+
+def update_document_fields(document_id: str, fields: dict[str, Any]) -> None:
+    """
+    Partial update to one `documents` row via set(merge=True). Used by
+    maintenance scripts that need to add or correct individual fields
+    without rewriting the whole document.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_documents_collection
+    client.collection(collection).document(document_id).set(fields, merge=True)
+
+
+def update_chunks_for_document(
+    document_id: str, fields: dict[str, Any], batch_size: int = 400
+) -> int:
+    """
+    Apply a partial update (set merge=True) of `fields` to every chunk row
+    whose document_id matches. Returns the count updated.
+
+    Symmetric with delete_chunks_for_document — used by maintenance scripts
+    to backfill or correct chunk metadata without re-embedding.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = client.collection(settings.firestore_chunks_collection)
+
+    query = collection.where(filter=FieldFilter("document_id", "==", document_id))
+    updated = 0
+    batch = client.batch()
+    in_batch = 0
+
+    for snap in query.stream():
+        batch.set(snap.reference, fields, merge=True)
+        in_batch += 1
+        updated += 1
+        if in_batch >= batch_size:
+            batch.commit()
+            batch = client.batch()
+            in_batch = 0
+
+    if in_batch > 0:
+        batch.commit()
+
+    return updated
 
 
 def delete_chunks_for_document(document_id: str, batch_size: int = 400) -> int:
@@ -196,6 +265,95 @@ def delete_chunks_for_document(document_id: str, batch_size: int = 400) -> int:
         batch.commit()
 
     return deleted
+
+
+def get_contact_by_email(email: str) -> dict[str, Any] | None:
+    """
+    Find one contact in `contacts` by email address. Returns the doc dict
+    (including doc.id as ghl_contact_id if not already on the record) or None.
+
+    Lookup is case-insensitive on the email field — the GHL sync stores
+    emails as-received, so we lowercase both sides for matching.
+    """
+    if not email:
+        return None
+    client = _get_client()
+    settings = get_settings()
+    coll = client.collection(settings.firestore_contacts_collection)
+
+    # Try exact match first (fast path when both sides happen to match case).
+    snapshots = list(
+        coll.where(filter=FieldFilter("email", "==", email))
+        .limit(1)
+        .stream()
+    )
+    if not snapshots:
+        snapshots = list(
+            coll.where(filter=FieldFilter("email", "==", email.lower()))
+            .limit(1)
+            .stream()
+        )
+    if not snapshots:
+        return None
+
+    doc = snapshots[0]
+    data = doc.to_dict() or {}
+    data.setdefault("ghl_contact_id", doc.id)
+    return data
+
+
+def get_municipality(slug: str) -> dict[str, Any] | None:
+    """Read one row from `municipalities` by slug doc-ID. None if missing."""
+    if not slug:
+        return None
+    client = _get_client()
+    settings = get_settings()
+    snap = (
+        client.collection(settings.firestore_municipalities_collection)
+        .document(slug)
+        .get()
+    )
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+# --- Drive watch state -----------------------------------------------------
+# The /webhooks/drive handler reads + advances a pageToken stored at
+# system/drive_watch_state. drive_watch.py persists the initial token after
+# creating the channel; the webhook advances it after each changes.list call.
+
+_DRIVE_WATCH_STATE_DOC = "drive_watch_state"
+
+
+def get_drive_watch_state() -> dict[str, Any] | None:
+    """Read the Drive watch state doc, or None if not yet initialized."""
+    client = _get_client()
+    settings = get_settings()
+    snap = (
+        client.collection(settings.firestore_system_collection)
+        .document(_DRIVE_WATCH_STATE_DOC)
+        .get()
+    )
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+def set_drive_watch_state(page_token: str, **extra) -> None:
+    """
+    Upsert the Drive watch state. `page_token` is what Drive returned on the
+    last changes.list call; everything else (channel_id, resource_id, etc.)
+    can be passed as keyword args and is merged in.
+    """
+    client = _get_client()
+    settings = get_settings()
+    payload = {"page_token": page_token, **extra}
+    (
+        client.collection(settings.firestore_system_collection)
+        .document(_DRIVE_WATCH_STATE_DOC)
+        .set(payload, merge=True)
+    )
 
 
 def find_chunks_by_filters(

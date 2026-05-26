@@ -45,6 +45,7 @@ from services.firestore.client import (
     put_agent_run,
     update_agent_run,
 )
+from services.research_agent_runner import run_research_for_lead
 
 logger = logging.getLogger(__name__)
 
@@ -189,13 +190,68 @@ def _dispatch_email_drafter(run_id: str, inputs: dict[str, Any]) -> None:
             )
 
 
+def _dispatch_research(run_id: str, inputs: dict[str, Any]) -> None:
+    """
+    BackgroundTask entry for the Research Agent via /agents/run.
+
+    Flips the stub's status to "running" with started_at, then invokes
+    run_research_for_lead with the stub's run_id so the runner's
+    terminal write (status="completed"|"partial"|"failed") merges into
+    the same doc.
+
+    The Research Agent's "many steps" (LOBBY-1, PW-3, S1-4, S3-PREP, ...)
+    are prompt YAMLs under backend/prompts/research_agent/<TYPE>/v1.yaml.
+    The dispatcher doesn't need to know which type was requested — it
+    passes `inputs` straight through. The runner picks the YAML from
+    inputs["research_type"]. Adding a new type = drop a YAML in. No
+    dispatcher change.
+
+    Never raises — failures are caught and recorded on agent_runs so the
+    GET endpoint can surface them.
+    """
+    started_at = datetime.now(tz=timezone.utc)
+    try:
+        update_agent_run(
+            run_id,
+            {"status": "running", "started_at": started_at},
+        )
+    except Exception:
+        logger.exception(
+            "agents.run failed to flip status to running",
+            extra={"run_id": run_id, "agent": "research"},
+        )
+        # Continue — the runner's terminal write will still land.
+
+    try:
+        run_research_for_lead(inputs, run_id=run_id)
+    except Exception as exc:
+        logger.exception(
+            "agents.run research dispatch failed",
+            extra={"run_id": run_id},
+        )
+        try:
+            update_agent_run(
+                run_id,
+                {
+                    "status": "failed",
+                    "finished_at": datetime.now(tz=timezone.utc),
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "agents.run failed to record research failure",
+                extra={"run_id": run_id},
+            )
+
+
 # Maps `agent` field on POST body to dispatcher function.
 # Each dispatcher takes (run_id, inputs) and is responsible for its own
 # agent_runs lifecycle writes after the POST handler writes the stub.
 # Add a new agent by wiring its dispatcher here.
 AGENT_DISPATCH: dict[str, Callable[[str, dict[str, Any]], None]] = {
     "email_drafter": _dispatch_email_drafter,
-    # "deep_research": _dispatch_deep_research,  # Phase 2
+    "research": _dispatch_research,
     # "scoring": _dispatch_scoring,              # Phase 2
 }
 
@@ -231,8 +287,13 @@ async def run_agent(
     # Surface contact_id and municipality at the top level for indexed
     # queries on agent_runs. Both pulled from inputs since the shape is
     # agent-agnostic — every agent that operates on a contact has them.
+    # Research runs send `municipality_name` instead of `contact_municipality`;
+    # accept either so the stub stays comparable across agents.
     contact_id = body.inputs.get("contact_id")
-    municipality = body.inputs.get("contact_municipality")
+    municipality = (
+        body.inputs.get("contact_municipality")
+        or body.inputs.get("municipality_name")
+    )
 
     stub: dict[str, Any] = {
         "run_id": run_id,

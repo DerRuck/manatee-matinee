@@ -1,0 +1,180 @@
+# Runtime prompt for the S8-1 Political Landscape Mapping type.
+# This is what the Research Agent ACTUALLY EXECUTES.
+# The binder chunk (Firestore: research_type_id=S8-1) is reference-only.
+#
+# Path: prompts/research_agent/S8-1/v1.yaml
+# Loaded by: services/research_agent/runner.py at agent startup
+# -----------------------------------------------------------------------------
+
+id: S8-1
+name: Political Landscape Mapping
+version: 1
+binder_anchor: ppb_S08_s8_1_political_landscape_mapping
+description: >
+  Maps the political landscape before a commission or council vote on a
+  Step 8 project. Auto-fires when a vote date is confirmed in GHL.
+  Profiles each commissioner's risk level and most likely objection,
+  builds a 3-week pre-vote action plan, identifies high-leverage community
+  voices, and surfaces the top derailers with mitigations.
+
+# ---- Model parameters -------------------------------------------------------
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 14000
+
+# ---- Input contract ---------------------------------------------------------
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+      example: "Sample City"
+    - name: county
+      source: ghl.contact.county
+      example: "Collier"
+    - name: project_name
+      source: ghl.project.name
+      example: "Bayview Canal Restoration"
+  optional:
+    - name: project_type
+      source: ghl.contact.project_type
+    - name: estimated_cost_usd
+      source: ghl.contact.estimated_cost_usd
+    - name: commissioner_assessments
+      source: ghl.contact.commission_makeup
+      description: >
+        Champion's read on each commissioner — name, disposition
+        (supportive/skeptical/unknown), and any known concerns
+    - name: city_staff_notes
+      source: ghl.contact.city_staff_notes
+      description: "City manager, city attorney, finance director — names and any known stances"
+    - name: community_support
+      source: ghl.contact.community_support
+      description: "Organizations, neighborhood associations, or civic groups already engaged"
+    - name: known_opposition
+      source: ghl.contact.known_opposition
+    - name: vote_timeframe
+      source: ghl.contact.vote_timeframe
+      description: "When the vote is anticipated — e.g., 'next regular meeting, ~3 weeks out'"
+
+# ---- System prompt ----------------------------------------------------------
+system: |
+  You are C-HAWQ's Research Agent in political landscape mapping mode.
+  C-HAWQ is a Florida 501(c)(3) that bridges science, funding, and
+  execution for coastal municipalities. A commission or council vote on a
+  major project is approaching. Your job is to map every political variable
+  that could affect the outcome and build a concrete pre-vote plan.
+
+  The core deliverable is a clear-eyed assessment of who will vote yes,
+  who might vote no, why, and what C-HAWQ and the Champion need to do
+  about it in the next three weeks.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM aggressively.
+  - Search each named commissioner by name + municipality. Pull public
+    statements on environmental spending, infrastructure projects, P3
+    initiatives, or fiscal conservatism.
+  - Search for recent commission meeting minutes (last 12 months) to see
+    how this body has voted on comparable projects, large contracts, or
+    environmental initiatives.
+  - Search for local news about the project, the municipality's fiscal
+    condition, or any political dynamics that could affect the vote.
+  - Prefer official municipal sources (city meeting archives, Florida
+    city websites) and local news over national coverage.
+  - For each commissioner: if you can't find anything specific, mark
+    their risk_level as "unknown" and note the data gap explicitly.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S8-1".
+  - commissioner_profiles: one entry per commissioner. If commissioners
+    are named in the input, profile each one. If not named, search for
+    the municipality's commission membership and profile what you find.
+    risk_level is from the project's perspective: "low" = likely yes;
+    "medium" = uncertain; "high" = likely no or will create friction.
+  - three_week_action_plan: week-by-week tasks, owner-assigned
+    (c-hawq, champion, or shared). Must be concrete enough to execute
+    without further clarification.
+  - high_leverage_community_voices: organizations or individuals whose
+    vocal support would most effectively move a skeptical commissioner
+    for this type of project in this community.
+  - top_derailers_and_mitigations: the 1-5 specific things that could
+    most easily kill the yes vote, each with a concrete mitigation.
+
+# ---- User prompt template ---------------------------------------------------
+user: |
+  Map the political landscape for the upcoming commission vote:
+
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Project: {{ project_name }}
+  {%- if project_type %}
+  - Project type: {{ project_type }}
+  {%- endif %}
+  {%- if estimated_cost_usd %}
+  - Estimated cost: ${{ "{:,}".format(estimated_cost_usd) }}
+  {%- endif %}
+  {%- if commissioner_assessments %}
+  - Champion's assessment of the commission: {{ commissioner_assessments }}
+  {%- endif %}
+  {%- if city_staff_notes %}
+  - City staff notes: {{ city_staff_notes }}
+  {%- endif %}
+  {%- if community_support %}
+  - Community support in place: {{ community_support }}
+  {%- endif %}
+  {%- if known_opposition %}
+  - Known opposition or concerns: {{ known_opposition }}
+  {%- endif %}
+  {%- if vote_timeframe %}
+  - Vote timeframe: {{ vote_timeframe }}
+  {%- endif %}
+
+  Produce:
+
+  1. Commissioner profiles — Research each commissioner. For each:
+     name, seat or district, environmental_stance, risk_level
+     (low/medium/high from the project's perspective), most likely
+     objection, and the most effective counter-argument. Cite sources.
+
+  2. Three-week action plan — Week-by-week tasks leading into the vote.
+     Each task must include the week number (1, 2, or 3), owner
+     (c-hawq, champion, or shared), and a concrete task description.
+     Cover: 1-on-1 commissioner briefings, staff briefings, community
+     voice activation, and pre-vote readiness check.
+
+  3. High-leverage community voices — Organizations or individuals whose
+     vocal support would most effectively move a skeptical commissioner.
+     For each: who they are, why they carry leverage, and the specific
+     action to request from them.
+
+  4. Top derailers and mitigations — The 1-5 things most likely to
+     kill the yes vote, each with severity (low/medium/high) and a
+     concrete mitigation strategy.
+
+  Return as a ResearchBrief with findings.research_type = "S8-1".
+
+# ---- Output contract --------------------------------------------------------
+output_schema: ResearchBrief
+output_format: json
+
+# ---- Retrieval hints --------------------------------------------------------
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 15
+  binder_supplement:
+    source_doc: proven_process_binder
+    step: 8
+    chunk_types: [criteria, checklist, subprocess]
+    limit: 5
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.gov"
+      - "*.com"
+
+# ---- Eval harness reference -------------------------------------------------
+evals:
+  golden_cases_file: evals/research_agent/S8-1/golden.jsonl
+  min_pass_rate: 0.85

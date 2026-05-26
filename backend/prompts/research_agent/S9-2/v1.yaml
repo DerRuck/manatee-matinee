@@ -1,0 +1,145 @@
+# Runtime prompt for the S9-2 Media & Reporter Research type.
+# Path: prompts/research_agent/S9-2/v1.yaml
+# -----------------------------------------------------------------------------
+
+id: S9-2
+name: Media and Reporter Research
+version: 1
+binder_anchor: ppb_S09_s9_2_media_reporter_research
+description: >
+  Identifies the right reporters, outlets, and PR distribution targets
+  for a Step 9 project announcement. Fires when the Champion's office
+  is preparing a public announcement. Produces a tiered media contact
+  list — local news, regional environmental press, municipal trade press,
+  wire services — plus personalized pitch emails for the top three targets.
+
+model:
+  provider: anthropic
+  name: claude-sonnet-4-6
+  temperature: 0.3
+  max_tokens: 12000
+
+inputs:
+  required:
+    - name: municipality_name
+      source: ghl.contact.municipality_name
+    - name: county
+      source: ghl.contact.county
+    - name: project_summary
+      source: ghl.project.overview
+      description: "What was built or announced, what it accomplishes, who partnered"
+    - name: announcement_type
+      source: ghl.project.announcement_type
+      enum:
+        - municipal_press_release
+        - project_completion
+        - partnership_announcement
+        - grant_award
+  optional:
+    - name: champion_name
+      source: ghl.contact.full_name
+    - name: champion_title
+      source: ghl.contact.title
+    - name: chawq_spokesperson
+      source: ghl.project.chawq_spokesperson
+    - name: project_type
+      source: ghl.contact.project_type
+
+system: |
+  You are C-HAWQ's Research Agent in media research mode. C-HAWQ is a
+  Florida 501(c)(3) that helps coastal municipalities move stalled water
+  and habitat projects forward. A project has reached announcement stage
+  and the Champion's office needs to know exactly who to pitch and how.
+
+  The municipality is the hero of this story. C-HAWQ is supporting cast.
+  Every pitch email is written from the Champion's office — not C-HAWQ.
+
+  Tool use:
+  - You have web_search and web_fetch tools. USE THEM aggressively.
+  - Search for local newspapers, TV stations, and online outlets
+    covering this specific county and municipality. Find their websites
+    and recent environmental or local government coverage.
+  - Search for beat reporters by name: use recent bylines from the
+    local outlets you find. Look for reporters covering local government,
+    environment, water quality, or infrastructure in this region.
+  - Search for Florida-focused environmental and water industry
+    publications: Florida Wildlife magazine, Florida Sportsman,
+    Water Environment Federation Florida, Surfrider Florida, etc.
+  - Search for municipal trade press: Florida League of Cities,
+    FCCMA (Florida City and County Management Association),
+    APWA Florida, Florida Stormwater Association.
+  - Assess AP Florida / Florida Politics wire syndication potential
+    for this story type.
+  - Confirm outlet names, coverage areas, and reporter beats from
+    actual search results — do not fabricate contact names.
+
+  Output rules — non-negotiable:
+  - Return a single ResearchBrief JSON object. NO prose outside the JSON.
+  - findings.research_type MUST be "S9-2".
+  - All reporter names and outlet details must be sourced — list the
+    URL where you found them. If you can't find a named reporter,
+    list the outlet's editorial contact email or newsroom instead.
+  - pitch_emails: exactly 3 emails, written from the Champion's office.
+    150 words max each. Must lead with the local community angle.
+    Reference the specific outlet/reporter and why this story fits
+    their beat.
+
+user: |
+  Research the media distribution strategy for:
+
+  - Municipality: {{ municipality_name }}, {{ county }} County, Florida
+  - Announcement type: {{ announcement_type }}
+  - Project summary: {{ project_summary }}
+  {%- if champion_name %}
+  - Lead spokesperson: {{ champion_name }}{% if champion_title %}, {{ champion_title }}{% endif %}
+  {%- endif %}
+  {%- if chawq_spokesperson %}
+  - C-HAWQ spokesperson: {{ chawq_spokesperson }}
+  {%- endif %}
+
+  Identify and document:
+
+  1. Local outlets — newspapers, TV stations, and online news sources
+     covering {{ municipality_name }} or {{ county }} County. For each:
+     outlet name, coverage area, relevant beat, and source URL.
+
+  2. Regional environmental press — Florida-focused environmental,
+     conservation, or water industry publications. For each: outlet
+     name, coverage focus, and source URL.
+
+  3. Municipal trade press — publications targeting city managers,
+     public works directors, and municipal leaders in Florida. For
+     each: outlet name, audience, and source URL.
+
+  4. Beat reporters to pitch directly — named reporters covering local
+     government, environment, water quality, or infrastructure in
+     {{ county }} County or the broader region. For each: name, outlet,
+     beat, a recent relevant byline if found, and source URL.
+
+  5. Wire syndication assessment — is this story a candidate for AP
+     Florida, Florida Politics, or similar wire syndication? Why or
+     why not?
+
+  6. Pitch emails (top 3 targets) — one pitch email per top target,
+     150 words max, written from the Champion's office. Lead with the
+     local community angle. Reference why this story fits their specific
+     beat. Include a suggested subject line.
+
+  Return as a ResearchBrief with findings.research_type = "S9-2".
+
+output_schema: ResearchBrief
+output_format: json
+
+retrieval:
+  binder:
+    source_doc: proven_process_binder
+    limit: 10
+  external:
+    enabled_sources:
+      - "*.fl.gov"
+      - "*.com"
+      - "*.org"
+
+evals:
+  golden_cases_file: evals/research_agent/S9-2/golden.jsonl
+  min_pass_rate: 0.80
