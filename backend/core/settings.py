@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     firestore_contact_scores_collection: str = "contact_scores"
     # Per-sweep audit doc written by the daily scoring sweep.
     firestore_scoring_sweeps_collection: str = "scoring_sweeps"
+    # Inbound + outbound communications (email, SMS, Plaud transcripts, notes)
+    # the scoring agent reads to detect engagement and stall.
+    firestore_communications_collection: str = "communications"
 
     # --- Vector embeddings (Vertex) ---
     vertex_embedding_model: str = "text-embedding-005"

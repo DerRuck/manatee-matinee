@@ -12,6 +12,9 @@ agent_type convention (set as a Custom Data field on each GHL Workflow):
     presentation:<TYPE>            -> PresentationAgent(TYPE)     e.g. "presentation:PA-STEP4"
     scoring                        -> ScoringAgent (default PIPELINE-SCORE)
     scoring:<TYPE>                 -> ScoringAgent(TYPE)          e.g. "scoring:PIPELINE-SCORE"
+    comm:ingest                    -> write the payload into the communications
+                                       collection so the scoring agent can see
+                                       the signal on the next run
 
 If agent_type is missing or unknown, the dispatcher falls back to
 hello_world so a misconfigured Workflow can't drop the contact entirely.
@@ -61,6 +64,8 @@ def dispatch_ghl_payload(payload: dict[str, Any]) -> None:
             _run_scoring("PIPELINE-SCORE", payload)
         elif normalized.startswith("scoring:"):
             _run_scoring(agent_type.split(":", 1)[1].strip().upper(), payload)
+        elif normalized in ("comm:ingest", "communication:ingest"):
+            _ingest_communication(payload)
         else:
             logger.warning(
                 "ghl dispatch unknown agent_type — falling back to hello_world",
@@ -165,6 +170,125 @@ def _run_scoring(score_type: str, payload: dict[str, Any]) -> None:
             "input_tokens": meta.get("input_tokens"),
             "output_tokens": meta.get("output_tokens"),
             "elapsed_sec": meta.get("elapsed_sec"),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Communications ingestion
+# ---------------------------------------------------------------------------
+
+# GHL Workflow payload field aliases — different message types arrive with
+# slightly different keys. Map to the Communication schema in one place so
+# the workflow operator can use either GHL's native field names or our
+# canonical ones interchangeably.
+_COMM_ALIASES: dict[str, tuple[str, ...]] = {
+    "channel":     ("channel", "messageType", "message_type", "type"),
+    "direction":   ("direction", "messageDirection"),
+    "timestamp":   ("timestamp", "dateAdded", "messageDate", "date_added"),
+    "subject":     ("subject", "emailSubject"),
+    "body":        ("body", "message", "transcript", "text", "emailBody"),
+    "author":      ("author", "fromEmail", "from", "sender"),
+    "source_ref":  ("messageId", "message_id", "id", "source_ref"),
+}
+
+
+def _pick(payload: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for k in keys:
+        if k in payload and payload[k] not in (None, ""):
+            return payload[k]
+    return None
+
+
+_GHL_TYPE_TO_CHANNEL: dict[str, str] = {
+    "TYPE_EMAIL":    "email",
+    "TYPE_SMS":      "sms",
+    "TYPE_CALL":     "call",
+    "TYPE_VOICEMAIL": "call",
+    "EMAIL":         "email",
+    "SMS":           "sms",
+}
+
+
+def _normalize_channel(raw: Any) -> str:
+    if isinstance(raw, str):
+        key = raw.strip().upper()
+        if key in _GHL_TYPE_TO_CHANNEL:
+            return _GHL_TYPE_TO_CHANNEL[key]
+        lower = raw.strip().lower()
+        if lower in {"email", "sms", "voice_transcript", "note", "call"}:
+            return lower
+    return "note"
+
+
+def _normalize_direction(raw: Any) -> str:
+    if isinstance(raw, str):
+        lower = raw.strip().lower()
+        if lower in {"inbound", "outbound", "internal"}:
+            return lower
+    return "inbound"
+
+
+def _parse_timestamp(raw: Any) -> "datetime":
+    from datetime import datetime, timezone
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    if isinstance(raw, str) and raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return datetime.now(tz=timezone.utc)
+
+
+def _ingest_communication(payload: dict[str, Any]) -> None:
+    """Write a GHL inbound message into the communications collection.
+
+    Returns silently when contact_id is missing — there's nothing to attach
+    the comm to. Logs and moves on; the workflow's 202 already shipped.
+    """
+    from services.firestore.communications import (
+        Communication, make_comm_id, put_communication,
+    )
+
+    contact_id = payload.get("contact_id") or payload.get("contactId") or payload.get("id")
+    if not contact_id:
+        logger.warning(
+            "comm ingest: no contact_id — refusing to write",
+            extra={"keys": sorted(payload.keys())[:10]},
+        )
+        return
+
+    body = _pick(payload, _COMM_ALIASES["body"]) or ""
+    if not body and not _pick(payload, _COMM_ALIASES["subject"]):
+        logger.warning(
+            "comm ingest: empty body + no subject — skipping",
+            extra={"contact_id": contact_id},
+        )
+        return
+
+    source_ref = _pick(payload, _COMM_ALIASES["source_ref"])
+    comm = Communication(
+        comm_id=make_comm_id("ghl", source_ref, str(body)),
+        contact_id=str(contact_id),
+        channel=_normalize_channel(_pick(payload, _COMM_ALIASES["channel"])),
+        direction=_normalize_direction(_pick(payload, _COMM_ALIASES["direction"])),
+        timestamp=_parse_timestamp(_pick(payload, _COMM_ALIASES["timestamp"])),
+        subject=_pick(payload, _COMM_ALIASES["subject"]),
+        body=str(body),
+        source="ghl",
+        source_ref=str(source_ref) if source_ref else None,
+        author=_pick(payload, _COMM_ALIASES["author"]),
+    )
+
+    put_communication(comm)
+    logger.info(
+        "comm ingest stored",
+        extra={
+            "contact_id": contact_id,
+            "channel": comm.channel,
+            "direction": comm.direction,
+            "comm_id": comm.comm_id,
         },
     )
 

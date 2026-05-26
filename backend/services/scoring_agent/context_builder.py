@@ -110,16 +110,47 @@ def _fetch_agent_runs(contact_id: str, limit: int) -> list[dict[str, Any]]:
         raise
 
 
-def _fetch_communications(contact_id: str, limit: int) -> list[dict[str, Any]]:
-    """Recent inbound + outbound communications.
+_COMM_BODY_PREVIEW_CHARS = 600  # per-message ceiling sent to the scorer
 
-    Sprint scope: returns []. The team hasn't ingested email threads
-    into Firestore yet (per transcript 2026-05-22 — "we're getting that
-    scheduled a bit more"). This function exists so the wire-up is in
-    place — when the email_threads collection lands, only this one body
-    changes.
+
+def _fetch_communications(contact_id: str, limit: int) -> list[dict[str, Any]]:
+    """Recent inbound + outbound communications, newest first.
+
+    Pulls from the Firestore `communications` collection — emails, SMS,
+    Plaud transcripts, notes. Each message body is trimmed to
+    _COMM_BODY_PREVIEW_CHARS so a long thread doesn't dominate the prompt;
+    the scorer sees enough to detect tone, intent, and recent ask, not
+    every word.
+
+    Returns [] on any read failure so a missing collection (e.g. before
+    the first ingestion run) doesn't break the scoring pipeline.
     """
-    return []
+    try:
+        from services.firestore.communications import list_communications
+        raw = list_communications(contact_id, limit=limit)
+    except Exception:
+        logger.exception(
+            "communications fetch failed — proceeding without comm signal",
+            extra={"contact_id": contact_id},
+        )
+        return []
+
+    out: list[dict[str, Any]] = []
+    for c in raw:
+        body = c.get("body") or ""
+        if len(body) > _COMM_BODY_PREVIEW_CHARS:
+            body = body[:_COMM_BODY_PREVIEW_CHARS].rstrip() + " …[truncated]"
+        out.append({
+            "comm_id":    c.get("comm_id"),
+            "channel":    c.get("channel"),
+            "direction":  c.get("direction"),
+            "timestamp":  _format_dt(c.get("timestamp")),
+            "subject":    c.get("subject"),
+            "author":     c.get("author"),
+            "body":       body,
+            "source":     c.get("source"),
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------

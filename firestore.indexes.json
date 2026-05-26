@@ -31,6 +31,14 @@
         { "fieldPath": "ready_to_advance", "order": "ASCENDING" },
         { "fieldPath": "lead_heat_score", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "communications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "contact_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
