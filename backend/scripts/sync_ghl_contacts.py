@@ -18,10 +18,18 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
-from core.logging import configure_logging
-from core.settings import get_settings
-from services.ghl.sync import run_sync
+# Load .env from the repo root BEFORE importing settings — pydantic-settings
+# resolves env_file=".env" relative to cwd, which misses the repo-root .env
+# when this script is launched from backend/. Mirrors the load_dotenv call
+# in app/main.py.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+
+from core.logging import configure_logging  # noqa: E402
+from core.settings import get_settings  # noqa: E402
+from services.ghl.sync import run_sync  # noqa: E402
 
 
 logger = logging.getLogger("sync_ghl_contacts")

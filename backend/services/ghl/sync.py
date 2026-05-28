@@ -48,22 +48,33 @@ LEAD_PIPELINE_IDS = {
     "XzMFX3KQkOKBs23U2OQE",  # Project Pipeline
 }
 
-# Tag → municipality metadata.
+# companyName → municipality metadata.
 # Tuple shape: (slug, display_name, state, county, jurisdiction_type).
 # Slugs follow the 4/23 lowercase-underscore identity convention so they
 # align with chunks.municipality[].
+#
+# Switched from tag-based to companyName-based resolution on 5/28 after
+# inspecting the existing 200-contact mirror: the data resolves municipality
+# from `contact.companyName`, not from tags (tags carry a generic
+# "municipality" label rather than a per-municipality identifier).
+#
+# Keys are lowercased — the resolver lowercases the companyName before lookup
+# so common casing variants ("SFWMD" vs "sfwmd") all hit the same row.
 # Add an entry per municipality entering the pilot; mapping changes propagate
 # to existing Firestore rows on the next re-sync.
-TAG_TO_MUNICIPALITY: dict[str, tuple[str, str, str, str, str]] = {
-    "rookery-bay":  ("rookery_bay",     "Rookery Bay, FL",                          "FL", "Collier", "state"),
-    "rookery_bay":  ("rookery_bay",     "Rookery Bay, FL",                          "FL", "Collier", "state"),
-    "sfwmd":        ("sfwmd",           "South Florida Water Management District", "FL",
-                     "Broward, Collier, Glades, Hendry, Lee, Martin, Miami-Dade, Monroe, Palm Beach, St. Lucie (+ portions of Charlotte, Highlands, Okeechobee, Orange, Osceola, Polk)",
-                     "wmd"),
-    "naples":       ("naples_fl",       "Naples, FL",                               "FL", "Collier", "city"),
-    "naples-fl":    ("naples_fl",       "Naples, FL",                               "FL", "Collier", "city"),
-    "marco-island": ("marco_island_fl", "Marco Island, FL",                         "FL", "Collier", "city"),
-    "marco_island": ("marco_island_fl", "Marco Island, FL",                         "FL", "Collier", "city"),
+COMPANYNAME_TO_MUNICIPALITY: dict[str, tuple[str, str, str, str, str]] = {
+    "sfwmd":                                       ("sfwmd",           "South Florida Water Management District", "FL",
+                                                    "Broward, Collier, Glades, Hendry, Lee, Martin, Miami-Dade, Monroe, Palm Beach, St. Lucie (+ portions of Charlotte, Highlands, Okeechobee, Orange, Osceola, Polk)",
+                                                    "wmd"),
+    "south florida water management district":     ("sfwmd",           "South Florida Water Management District", "FL",
+                                                    "Broward, Collier, Glades, Hendry, Lee, Martin, Miami-Dade, Monroe, Palm Beach, St. Lucie (+ portions of Charlotte, Highlands, Okeechobee, Orange, Osceola, Polk)",
+                                                    "wmd"),
+    "rookery bay":                                 ("rookery_bay",     "Rookery Bay, FL",  "FL", "Collier", "state"),
+    "rookery bay nerr":                            ("rookery_bay",     "Rookery Bay, FL",  "FL", "Collier", "state"),
+    "naples":                                      ("naples_fl",       "Naples, FL",       "FL", "Collier", "city"),
+    "city of naples":                              ("naples_fl",       "Naples, FL",       "FL", "Collier", "city"),
+    "marco island":                                ("marco_island_fl", "Marco Island, FL", "FL", "Collier", "city"),
+    "city of marco island":                        ("marco_island_fl", "Marco Island, FL", "FL", "Collier", "city"),
 }
 
 
@@ -72,14 +83,18 @@ TAG_TO_MUNICIPALITY: dict[str, tuple[str, str, str, str, str]] = {
 # ---------------------------------------------------------------------------
 
 def resolve_municipality(
-    tags: list[str],
+    contact: dict[str, Any],
 ) -> tuple[str, str, str, str, str] | None:
-    """Match the first known tag in the contact's tag list."""
-    for tag in tags or []:
-        normalized = tag.lower().strip()
-        if normalized in TAG_TO_MUNICIPALITY:
-            return TAG_TO_MUNICIPALITY[normalized]
-    return None
+    """Match the contact's companyName against the known-municipality map.
+
+    Case-insensitive match — `"SFWMD"`, `"sfwmd"`, and `"Sfwmd"` all hit the
+    same row. Returns None when companyName is empty or unrecognized; the
+    caller MUST NOT overwrite an existing municipality_slug with None.
+    """
+    company_name = (contact.get("companyName") or "").strip().lower()
+    if not company_name:
+        return None
+    return COMPANYNAME_TO_MUNICIPALITY.get(company_name)
 
 
 def derive_lead_candidate(opportunities: list[dict[str, Any]]) -> bool:
@@ -107,8 +122,18 @@ def build_contact_doc(
     municipality_slug: str | None,
     sync_source: str,
 ) -> dict[str, Any]:
+    """Build the contact doc to upsert.
+
+    `municipality_slug` is OMITTED from the returned dict when None — `set(merge=True)`
+    leaves any existing value untouched. This prevents a re-sync from wiping
+    a municipality_slug that was set by a prior run with a richer resolver
+    or by manual correction.
+
+    `active_project_slug` follows the same rule: omitted unless explicitly
+    provided (forward-compat for multi-project).
+    """
     primary = opportunities[0] if opportunities else {}
-    return {
+    doc: dict[str, Any] = {
         "ghl_contact_id": contact.get("id"),
         "first_name": contact.get("firstName"),
         "last_name": contact.get("lastName"),
@@ -117,10 +142,6 @@ def build_contact_doc(
         "tags": contact.get("tags") or [],
         "job_title": extract_custom_field(contact, CF_JOB_TITLE),
         "contact_notes": extract_custom_field(contact, CF_CONTACT_NOTES),
-        "municipality_slug": municipality_slug,
-        # active_project_slug reserved for the multi-project case (5/15
-        # forward-compat decision). Null in V1.
-        "active_project_slug": None,
         "opportunity_id": primary.get("id"),
         "pipeline_id": primary.get("pipelineId"),
         "pipeline_stage_id": primary.get("pipelineStageId"),
@@ -131,6 +152,9 @@ def build_contact_doc(
         "sync_source": sync_source,
         "raw": contact,
     }
+    if municipality_slug is not None:
+        doc["municipality_slug"] = municipality_slug
+    return doc
 
 
 def _seed_municipality_doc(
@@ -183,7 +207,7 @@ def _sync_one(
     opportunities = fetch_opportunities_for_contact(
         contact_id, client=ghl_client,
     )
-    resolved = resolve_municipality(contact.get("tags") or [])
+    resolved = resolve_municipality(contact)
 
     municipality_slug: str | None = None
     has_municipality = False
