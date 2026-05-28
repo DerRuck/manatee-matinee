@@ -1,0 +1,40 @@
+# CI/CD for chawq-mcp (prod) on Cloud Run.
+#
+# NOT YET ACTIVE. The prod C-HAWQ API (``chawq-api``) is still on the older
+# flat-body / stubbed GET schema (memory: ``project_chawq_prod_dev_drift``),
+# so a prod MCP would talk to a backend that doesn't yet implement the
+# ``/agents/runs/{id}`` polling contract this MCP relies on.
+#
+# Deploy steps once prod API catches up:
+#   1. Confirm chawq-api implements /agents/run nested body + /agents/runs/{id} GET.
+#   2. Update CHAWQ_API_BASE below to the prod URL.
+#   3. Set up a Cloud Build trigger on main with the same mcp/** path filter.
+#
+# Until then, leave this file in the repo so the prod path is documented,
+# but DO NOT trigger it.
+
+steps:
+  - id: 'deploy'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    dir: 'mcp'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'chawq-mcp'
+      - '--source=.'
+      - '--region=us-central1'
+      - '--project=chawq-manatee-matinee'
+      - '--build-service-account=projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
+      # TODO: update to the prod chawq-api URL once prod schema matches dev.
+      - '--set-env-vars=CHAWQ_API_BASE=https://chawq-api-PROD-URL.us-central1.run.app'
+      - '--set-secrets=CHAWQ_SHARED_SECRET=chawq-shared-secret:latest,CHAWQ_MCP_SHARED_SECRET=chawq-mcp-shared-secret:latest'
+      - '--service-account=chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
+      - '--allow-unauthenticated'
+
+serviceAccount: 'projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'

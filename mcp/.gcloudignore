@@ -1,0 +1,19 @@
+# Files that should NOT be uploaded to Cloud Build when running
+# `gcloud run deploy --source=.` from this directory.
+
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+
+# Local-only files; don't bake into the image.
+.env
+.env.*
+smoke_remote.py
+README.md
