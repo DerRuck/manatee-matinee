@@ -42,6 +42,7 @@ from typing import Any, Iterable, Literal, Optional
 
 from agents.base import BaseAgent
 from services.firestore.client import find_chunks_by_filters
+from utils.dates import today_iso_date
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,12 @@ def _build_user_message(
 ) -> str:
     """Render lead profile + triggering event + retrieved context block."""
     lines: list[str] = []
+    # Inject today's date FIRST so the model can reason about recency
+    # without parsing dates out of retrieved chunks (chunks carry the
+    # event timestamps from when they were authored, not today). The
+    # prompt's suggested_send section references this value explicitly.
+    lines.append(f"TODAY'S DATE: {today_iso_date()}")
+    lines.append("")
     lines.append("LEAD PROFILE")
     lines.append(f"  First name: {input_.contact_first_name}")
     lines.append(f"  Last name: {input_.contact_last_name}")

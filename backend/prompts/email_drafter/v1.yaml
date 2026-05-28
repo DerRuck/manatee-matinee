@@ -102,6 +102,12 @@ system_prompt: |
       - "Let us know if any of that's worth a deeper look."
 
   SUGGESTED SEND TIMING
+    Compute suggested_send relative to TODAY'S DATE provided in the
+    user-message context, NOT to dates you find in retrieved chunks
+    (chunks carry their own historical timestamps). The triggering
+    event's date, when present, is the anchor for "how long ago did
+    this happen."
+
     - "next_business_day" if the event was in the last 48 hours and the
       conversation had real momentum (specific project named, follow-up
       asked for).
@@ -109,6 +115,11 @@ system_prompt: |
       connected, not so close it reads as transactional.
     - "next_week" if the lead is senior, the conversation was brief, or
       the relationship is early — give them room.
+
+    In suggested_send_reason, reference today's date and the triggering
+    event date explicitly (e.g., "event was 4 days ago; mid-week send
+    keeps the thread warm without rushing"). Do NOT cite calendar dates
+    from retrieved chunks as the "current" date.
 
 config:
   max_tokens: 1200

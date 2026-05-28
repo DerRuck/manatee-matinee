@@ -34,6 +34,7 @@ import yaml
 from jinja2 import Template
 
 from services.research_agent.schema import ResearchBrief, json_schema_for_type
+from utils.dates import today_iso_date
 
 BINDER_COLLECTION = "chunks"
 
@@ -224,7 +225,10 @@ def run(
 
     schema = json_schema_for_type(cfg["id"])
     system = build_system_prompt(cfg, binder_canonical, schema, no_web_search=no_web_search)
-    user = Template(cfg["user"]).render(**inputs)
+    # today_date is available to every research prompt as `{{ today_date }}`.
+    # No prompt is required to use it but prompts that want date-aware reasoning can opt in
+    # without touching this runner.
+    user = Template(cfg["user"]).render(**inputs, today_date=today_iso_date())
 
     if verbose:
         print(f"[4/5] Built prompts: system={len(system):,} chars, user={len(user):,} chars")
