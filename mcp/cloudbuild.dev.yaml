@@ -1,0 +1,55 @@
+# CI/CD for chawq-mcp-dev on Cloud Run.
+#
+# Trigger: push to dev with included-files filter set to ``mcp/**`` so
+# unrelated backend / frontend changes don't redeploy the MCP.
+#
+# Mirrors backend/cloudbuild.dev.yaml conventions:
+#   - Service:    chawq-mcp-dev
+#   - Region:     us-central1
+#   - Build SA:   chawq-builder@…
+#   - Runtime SA: chawq-api-runtime@… (reused; the MCP doesn't touch GCP
+#                 services directly — it only calls the public C-HAWQ API)
+#
+# Auth model:
+#   - Inbound  (Claude → MCP):  CHAWQ_MCP_SHARED_SECRET, bound to the new
+#                               ``chawq-mcp-shared-secret`` Secret Manager
+#                               secret. Validated by McpSecretMiddleware on
+#                               every request.
+#   - Outbound (MCP → API):     CHAWQ_SHARED_SECRET, bound to the existing
+#                               ``chawq-shared-secret`` Secret Manager
+#                               secret. Sent as X-CHAWQ-Secret on every API
+#                               call. Same value the backend validates.
+#
+# Re-deploys via ``gcloud run deploy --set-env-vars`` REPLACE the full env-var
+# set, so anything the runtime needs has to be listed here. Same for
+# ``--set-secrets``.
+
+steps:
+  - id: 'deploy'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    dir: 'mcp'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'chawq-mcp-dev'
+      - '--source=.'
+      - '--region=us-central1'
+      - '--project=chawq-manatee-matinee'
+      - '--build-service-account=projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
+      - '--set-env-vars=CHAWQ_API_BASE=https://chawq-api-dev-783495307551.us-central1.run.app'
+      - '--set-secrets=CHAWQ_SHARED_SECRET=chawq-shared-secret:latest,CHAWQ_MCP_SHARED_SECRET=chawq-mcp-shared-secret:latest'
+      - '--service-account=chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
+      # Public ingress is required so Claude's MCP client can reach the
+      # service. Application-layer auth (McpSecretMiddleware) is what keeps
+      # the endpoint safe.
+      - '--allow-unauthenticated'
+      # Defaults are fine for the rest. Memory: low concurrency, the agent
+      # API does the heavy lifting; the MCP is a thin forwarder.
+
+serviceAccount: 'projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'
