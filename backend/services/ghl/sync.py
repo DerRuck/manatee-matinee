@@ -63,18 +63,58 @@ LEAD_PIPELINE_IDS = {
 # Add an entry per municipality entering the pilot; mapping changes propagate
 # to existing Firestore rows on the next re-sync.
 COMPANYNAME_TO_MUNICIPALITY: dict[str, tuple[str, str, str, str, str]] = {
+    # Water management districts
     "sfwmd":                                       ("sfwmd",           "South Florida Water Management District", "FL",
                                                     "Broward, Collier, Glades, Hendry, Lee, Martin, Miami-Dade, Monroe, Palm Beach, St. Lucie (+ portions of Charlotte, Highlands, Okeechobee, Orange, Osceola, Polk)",
                                                     "wmd"),
     "south florida water management district":     ("sfwmd",           "South Florida Water Management District", "FL",
                                                     "Broward, Collier, Glades, Hendry, Lee, Martin, Miami-Dade, Monroe, Palm Beach, St. Lucie (+ portions of Charlotte, Highlands, Okeechobee, Orange, Osceola, Polk)",
                                                     "wmd"),
-    "rookery bay":                                 ("rookery_bay",     "Rookery Bay, FL",  "FL", "Collier", "state"),
-    "rookery bay nerr":                            ("rookery_bay",     "Rookery Bay, FL",  "FL", "Collier", "state"),
-    "naples":                                      ("naples_fl",       "Naples, FL",       "FL", "Collier", "city"),
-    "city of naples":                              ("naples_fl",       "Naples, FL",       "FL", "Collier", "city"),
-    "marco island":                                ("marco_island_fl", "Marco Island, FL", "FL", "Collier", "city"),
-    "city of marco island":                        ("marco_island_fl", "Marco Island, FL", "FL", "Collier", "city"),
+    "sjrwmd":                                      ("sjrwmd",          "St. Johns River Water Management District", "FL",
+                                                    "Alachua, Baker, Bradford, Brevard, Clay, Duval, Flagler, Indian River, Lake, Marion, Nassau, Okeechobee, Orange, Osceola, Putnam, Seminole, St. Johns, Volusia",
+                                                    "wmd"),
+    "st. johns river water management district":   ("sjrwmd",          "St. Johns River Water Management District", "FL",
+                                                    "Alachua, Baker, Bradford, Brevard, Clay, Duval, Flagler, Indian River, Lake, Marion, Nassau, Okeechobee, Orange, Osceola, Putnam, Seminole, St. Johns, Volusia",
+                                                    "wmd"),
+    "st johns river water management district":    ("sjrwmd",          "St. Johns River Water Management District", "FL",
+                                                    "Alachua, Baker, Bradford, Brevard, Clay, Duval, Flagler, Indian River, Lake, Marion, Nassau, Okeechobee, Orange, Osceola, Putnam, Seminole, St. Johns, Volusia",
+                                                    "wmd"),
+
+    # State-managed
+    # display_name aligned with existing Firestore value ("Rookery Bay NERR")
+    # so a future re-seed produces the same doc shape.
+    "rookery bay":                                 ("rookery_bay",     "Rookery Bay NERR",            "FL", "Collier", "state"),
+    "rookery bay nerr":                            ("rookery_bay",     "Rookery Bay NERR",            "FL", "Collier", "state"),
+
+    # Counties
+    "brevard county":                              ("brevard_county_fl",    "Brevard County",         "FL", "Brevard",    "county"),
+    "charlotte county":                            ("charlotte_county_fl",  "Charlotte County",       "FL", "Charlotte",  "county"),
+    "collier county":                              ("collier_county_fl",    "Collier County",         "FL", "Collier",    "county"),
+    "miami-dade county":                           ("miami_dade_county_fl", "Miami-Dade County",      "FL", "Miami-Dade", "county"),
+    "miami dade county":                           ("miami_dade_county_fl", "Miami-Dade County",      "FL", "Miami-Dade", "county"),
+    "palm beach county":                           ("palm_beach_county_fl", "Palm Beach County",      "FL", "Palm Beach", "county"),
+    "polk county":                                 ("polk_county_fl",       "Polk County",            "FL", "Polk",       "county"),
+
+    # Cities — display_name aligned with existing Firestore values where present.
+    "boynton beach":                               ("boynton_beach_fl",     "City of Boynton Beach",      "FL", "Palm Beach",   "city"),
+    "city of boynton beach":                       ("boynton_beach_fl",     "City of Boynton Beach",      "FL", "Palm Beach",   "city"),
+    "dunedin":                                     ("dunedin_fl",           "City of Dunedin",            "FL", "Pinellas",     "city"),
+    "city of dunedin":                             ("dunedin_fl",           "City of Dunedin",            "FL", "Pinellas",     "city"),
+    "jacksonville":                                ("jacksonville_fl",      "City of Jacksonville",       "FL", "Duval",        "city"),
+    "city of jacksonville":                        ("jacksonville_fl",      "City of Jacksonville",       "FL", "Duval",        "city"),
+    "marco island":                                ("marco_island_fl",      "City of Marco Island",       "FL", "Collier",      "city"),
+    "city of marco island":                        ("marco_island_fl",      "City of Marco Island",       "FL", "Collier",      "city"),
+    "naples":                                      ("naples_fl",            "Naples, FL",                 "FL", "Collier",      "city"),
+    "city of naples":                              ("naples_fl",            "Naples, FL",                 "FL", "Collier",      "city"),
+    "north miami beach":                           ("north_miami_beach_fl", "City of North Miami Beach",  "FL", "Miami-Dade",   "city"),
+    "city of north miami beach":                   ("north_miami_beach_fl", "City of North Miami Beach",  "FL", "Miami-Dade",   "city"),
+    "st petersburg":                               ("st_petersburg_fl",     "City of St. Petersburg",     "FL", "Pinellas",     "city"),
+    "st. petersburg":                              ("st_petersburg_fl",     "City of St. Petersburg",     "FL", "Pinellas",     "city"),
+    "city of st. petersburg":                      ("st_petersburg_fl",     "City of St. Petersburg",     "FL", "Pinellas",     "city"),
+    "tampa":                                       ("tampa_fl",             "City of Tampa",              "FL", "Hillsborough", "city"),
+    "city of tampa":                               ("tampa_fl",             "City of Tampa",              "FL", "Hillsborough", "city"),
+    "titusville":                                  ("titusville_fl",        "City of Titusville",         "FL", "Brevard",      "city"),
+    "city of titusville":                          ("titusville_fl",        "City of Titusville",         "FL", "Brevard",      "city"),
 }
 
 
