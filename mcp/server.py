@@ -1,8 +1,13 @@
 """C-HAWQ MCP server — remote / HTTPS edition.
 
-Wraps the C-HAWQ agent API as two MCP tools and exposes them over Streamable
+Wraps the C-HAWQ agent API as three MCP tools and exposes them over Streamable
 HTTP so Claude (org-managed custom connector) can call them directly. No
 per-user install, no per-user shared secret on disk.
+
+Tools:
+    chawq_agent_run(agent, inputs)         -> POST /agents/run
+    chawq_agent_status(run_id)             -> GET  /agents/runs/{run_id}
+    chawq_contact_lookup(first_name?, ...) -> POST /contacts/search
 
 Two auth layers:
 
@@ -148,6 +153,68 @@ def chawq_agent_status(run_id: str) -> dict:
     """
     url = f"{API_BASE}/agents/runs/{run_id}"
     response = requests.get(url, headers=_api_headers(), timeout=30)
+    return _check(response, url)
+
+
+@mcp.tool()
+def chawq_contact_lookup(
+    first_name: str | None = None,
+    last_name: str | None = None,
+    municipality_slug: str | None = None,
+    query: str | None = None,
+    limit: int = 10,
+) -> dict:
+    """Look up a contact from the C-HAWQ Firestore mirror.
+
+    Used by the MVP workbook when the user mentions a contact in chat
+    ("nick from rookery bay"). The endpoint joins the contact with its
+    municipality server-side, so the response includes everything the
+    workbook needs (county, jurisdiction_type, municipality display name)
+    in one call.
+
+    Args:
+        first_name: Case-sensitive first-name match. Most common path.
+            Lowercase the user's input before passing — the V1 backfill
+            writes GHL names as-is and equality matching needs the casing
+            to line up.
+        last_name: Optional last-name filter. Combine with first_name to
+            disambiguate two people who share a first name.
+        municipality_slug: Optional slug filter (e.g. ``"rookery_bay"``).
+            Use when the user phrasing includes the municipality
+            ("nick from rookery bay") to narrow the search.
+        query: Free-text fallback when the workbook can't cleanly split the
+            user's phrasing. The endpoint treats it as a first_name match.
+        limit: Max results. Default 10.
+
+    Returns:
+        Dict with ``matches`` (list of contact records) and ``count``.
+        Each match contains contact_id, first_name, last_name, email, phone,
+        job_title, tags, is_lead_candidate, municipality_slug,
+        municipality_display, state, county, jurisdiction_type,
+        active_project_slug.
+
+        Empty ``matches`` means no contact was found — the workbook should
+        fall back to demo_contacts.yaml or ask the user to clarify.
+        Multiple entries mean the search was ambiguous — ask the user
+        which one they meant.
+    """
+    url = f"{API_BASE}/contacts/search"
+    body: dict = {"limit": limit}
+    if first_name is not None:
+        body["first_name"] = first_name
+    if last_name is not None:
+        body["last_name"] = last_name
+    if municipality_slug is not None:
+        body["municipality_slug"] = municipality_slug
+    if query is not None:
+        body["query"] = query
+
+    response = requests.post(
+        url,
+        json=body,
+        headers=_api_headers(content_type=True),
+        timeout=15,
+    )
     return _check(response, url)
 
 

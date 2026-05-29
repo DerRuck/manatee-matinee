@@ -318,6 +318,114 @@ def get_municipality(slug: str) -> dict[str, Any] | None:
     return snap.to_dict()
 
 
+def upsert_municipality(slug: str, data: dict[str, Any]) -> bool:
+    """
+    Upsert one `municipalities` row, keyed by slug. Set(merge=True) so partial
+    updates are safe — used by the GHL sync to refresh county/jurisdiction_type
+    from the TAG_TO_MUNICIPALITY mapping on every re-sync without clobbering
+    contact_count or status.
+
+    Returns True if the doc was created (didn't exist before), False if updated.
+    """
+    if not slug:
+        raise ValueError("upsert_municipality requires a non-empty slug")
+    client = _get_client()
+    settings = get_settings()
+    doc_ref = (
+        client.collection(settings.firestore_municipalities_collection)
+        .document(slug)
+    )
+    created = not doc_ref.get().exists
+    doc_ref.set(data, merge=True)
+    return created
+
+
+def upsert_contact(contact_id: str, data: dict[str, Any]) -> bool:
+    """
+    Upsert one `contacts` row, keyed by GHL contact ID. Set(merge=True) so
+    repeated syncs layer cleanly without erasing fields that the current
+    write didn't touch.
+
+    Returns True if the doc was created, False if updated.
+    """
+    if not contact_id:
+        raise ValueError("upsert_contact requires a non-empty contact_id")
+    client = _get_client()
+    settings = get_settings()
+    doc_ref = (
+        client.collection(settings.firestore_contacts_collection)
+        .document(contact_id)
+    )
+    created = not doc_ref.get().exists
+    doc_ref.set(data, merge=True)
+    return created
+
+
+def iter_contacts() -> Iterable[dict[str, Any]]:
+    """
+    Yield raw contact dicts from the `contacts` collection.
+
+    Each dict has `ghl_contact_id` populated from the Firestore doc ID even
+    when the field isn't on the stored record. No ordering guarantee.
+    Used by sync rollups (contact_count refresh) and maintenance scripts.
+    """
+    client = _get_client()
+    settings = get_settings()
+    coll = client.collection(settings.firestore_contacts_collection)
+    for snap in coll.stream():
+        data = snap.to_dict() or {}
+        data.setdefault("ghl_contact_id", snap.id)
+        yield data
+
+
+def search_contacts(
+    *,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    municipality_slug: str | None = None,
+    query: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    Search `contacts` by name + optional municipality.
+
+    V1 strategy: Firestore equality filters. Small dataset, exact match is fine.
+    `query` is a free-text fallback that treats the value as a first_name match
+    (used when the workbook can't cleanly split the user's phrasing).
+
+    Case handling: GHL stores names mixed-case and the V1 backfill writes them
+    as-is. The workbook lowercases inputs before calling; if that proves
+    brittle, add a `first_name_lower` denorm column on the contact doc and
+    filter against that instead.
+
+    Returns:
+        List of raw contact dicts, with `ghl_contact_id` populated from the
+        doc ID. Empty list when no match.
+    """
+    client = _get_client()
+    settings = get_settings()
+    col = client.collection(settings.firestore_contacts_collection)
+
+    q = col
+    if first_name:
+        q = q.where(filter=FieldFilter("first_name", "==", first_name))
+    elif query:
+        q = q.where(filter=FieldFilter("first_name", "==", query))
+    if last_name:
+        q = q.where(filter=FieldFilter("last_name", "==", last_name))
+    if municipality_slug:
+        q = q.where(
+            filter=FieldFilter("municipality_slug", "==", municipality_slug)
+        )
+
+    results: list[dict[str, Any]] = []
+    for snap in q.limit(limit).stream():
+        data = snap.to_dict() or {}
+        data.setdefault("ghl_contact_id", snap.id)
+        results.append(data)
+    return results
+
+
 # --- Drive watch state -----------------------------------------------------
 # The /webhooks/drive handler reads + advances a pageToken stored at
 # system/drive_watch_state. drive_watch.py persists the initial token after
