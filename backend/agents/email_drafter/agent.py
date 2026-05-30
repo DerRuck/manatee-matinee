@@ -73,9 +73,28 @@ class EmailDrafterInput:
 
     contact_title: Optional[str] = None
     contact_municipality: Optional[str] = None  # canonical slug, e.g. "rookery_bay_fl"
-    contact_email: Optional[str] = None  # the lead's email — used as Gmail draft To:
+    contact_email: Optional[str] = None  # the lead's email — single-recipient shorthand
     triggering_event_date: Optional[str] = None  # ISO date "YYYY-MM-DD"
     triggering_event_summary: Optional[str] = None  # one-line of what was discussed
+
+    # Multi-recipient support. `to_recipients` are the primary addressees;
+    # the FIRST To address is the one the email is personalized to (drives
+    # the prompt's "Hi <first name>," opener via the lead profile fields).
+    # `cc_recipients` are copied. `contact_email` stays as the
+    # single-recipient shorthand: when `to_recipients` is empty it seeds
+    # the first (and only) To. Resolve via resolved_to_recipients() /
+    # resolved_cc_recipients() rather than reading the raw fields so the
+    # back-compat fallback and de-duplication happen in one place.
+    to_recipients: Optional[list[str]] = None
+    cc_recipients: Optional[list[str]] = None
+
+    # When True (default), the runner fetches the from_user's live Gmail
+    # signature (sendAs settings) and appends it to the draft, stripping
+    # the prompt's "— C-HAWQ team" sign-off so the email doesn't close
+    # twice. Requires the gmail.settings.basic DWD scope authorized for
+    # the runtime SA; if the fetch fails the runner falls back to the
+    # draft body as-is.
+    append_signature: bool = True
 
     # Per-run Gmail author override. If None, downstream Gmail code falls
     # back to settings.gmail_simmer_default_user. Populated per V1 plan;
@@ -89,6 +108,24 @@ class EmailDrafterInput:
     context_filter_municipalities: Optional[list[str]] = None
     context_filter_contact_ids: Optional[list[str]] = None
     context_filter_document_types: Optional[list[str]] = None
+
+    def resolved_to_recipients(self) -> list[str]:
+        """
+        The To: list, de-duplicated and order-preserving. Falls back to
+        the single `contact_email` shorthand when `to_recipients` is empty
+        so existing single-recipient callers keep working unchanged.
+        """
+        emails = list(self.to_recipients or [])
+        if not emails and self.contact_email:
+            emails = [self.contact_email]
+        return _dedupe_emails(emails)
+
+    def resolved_cc_recipients(self) -> list[str]:
+        """The Cc: list, de-duplicated and stripped of any address that is
+        already a To: recipient (Gmail would otherwise double-send)."""
+        to_lower = {e.lower() for e in self.resolved_to_recipients()}
+        cc = [e for e in (self.cc_recipients or []) if e.lower() not in to_lower]
+        return _dedupe_emails(cc)
 
 
 @dataclass
@@ -120,6 +157,8 @@ class EmailDraftResult:
     # pipeline alongside the result.
     from_user: Optional[str] = None
     contact_email: Optional[str] = None
+    to_recipients: Optional[list[str]] = None
+    cc_recipients: Optional[list[str]] = None
 
 
 class EmailDrafterAgent(BaseAgent):
@@ -167,12 +206,30 @@ class EmailDrafterAgent(BaseAgent):
             model=result.model,
             from_user=input_.from_user,
             contact_email=input_.contact_email,
+            to_recipients=input_.resolved_to_recipients(),
+            cc_recipients=input_.resolved_cc_recipients(),
         )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _dedupe_emails(emails: Iterable[str]) -> list[str]:
+    """Order-preserving de-dupe, case-insensitive, dropping blanks."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in emails:
+        addr = (raw or "").strip()
+        if not addr:
+            continue
+        key = addr.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(addr)
+    return out
+
 
 def _retrieve_context_chunks(input_: EmailDrafterInput) -> list[dict[str, Any]]:
     """Resolve the filter and call find_chunks_by_filters."""

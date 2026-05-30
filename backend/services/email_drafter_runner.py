@@ -25,6 +25,7 @@ Easy to add when V2 wants it.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -38,7 +39,7 @@ from agents.email_drafter import (
 from core.settings import get_settings
 from services.drive.client import find_or_create_folder, upload_text_file
 from services.firestore.client import put_agent_run
-from services.gmail import create_draft, resolve_from_user
+from services.gmail import create_draft, get_signature, resolve_from_user
 from utils.municipality import slug_for_municipality, slugify
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,12 @@ class EmailDrafterRunResult:
     gmail_draft_id: Optional[str] = None
     gmail_web_link: Optional[str] = None
     gmail_error: Optional[str] = None
+
+    # Recipients the draft actually addressed + whether a live Gmail
+    # signature was appended. Captured for the Drive record + agent_runs.
+    to_recipients: Optional[list[str]] = None
+    cc_recipients: Optional[list[str]] = None
+    signature_appended: bool = False
 
     # Drive record side-effect.
     drive_file_id: Optional[str] = None
@@ -156,23 +163,55 @@ def run_email_drafter_for_lead(
     drive_web_link: Optional[str] = None
     drive_error: Optional[str] = None
 
+    # Resolve recipients once — used by both the Gmail draft and the
+    # Drive/agent_runs records. First To is the personalized lead; CC is
+    # already de-duped against To by the input helper.
+    to_recipients = input_.resolved_to_recipients()
+    cc_recipients = input_.resolved_cc_recipients()
+    signature_appended = False
+
     # 2. Gmail draft creation.
     if skip_gmail:
         logger.info("skipping gmail draft creation (skip_gmail=True)", extra=log_extra)
-    elif not input_.contact_email:
-        gmail_error = "no contact_email — cannot create Gmail draft"
+    elif not to_recipients:
+        gmail_error = "no recipients — cannot create Gmail draft"
         logger.warning(gmail_error, extra=log_extra)
     else:
         try:
             from_user = resolve_from_user(input_.from_user)
+
+            # Fetch the author's live Gmail signature when requested. A
+            # failure here (e.g. the gmail.settings.basic DWD scope not
+            # yet authorized) must not lose the draft — fall back to no
+            # signature and let the prompt's sign-off stand.
+            signature_html: Optional[str] = None
+            if input_.append_signature:
+                try:
+                    signature_html = get_signature(from_user)
+                except Exception as exc:
+                    logger.warning(
+                        "signature fetch failed — drafting without it: %s",
+                        f"{type(exc).__name__}: {exc}",
+                        extra=log_extra,
+                    )
+
+            # When a real signature is appended, drop the prompt's
+            # "— C-HAWQ team" sign-off so the email doesn't close twice.
+            body_for_draft = draft.body
+            if signature_html:
+                body_for_draft = _strip_team_signoff(draft.body)
+
             gmail_response = create_draft(
                 from_user=from_user,
-                to=input_.contact_email,
+                to=to_recipients,
+                cc=cc_recipients or None,
                 subject=draft.subject,
-                body=draft.body,
+                body=body_for_draft,
+                signature_html=signature_html,
             )
             gmail_draft_id = gmail_response.get("id")
             gmail_web_link = gmail_response.get("web_link")
+            signature_appended = bool(signature_html)
         except Exception as exc:
             gmail_error = f"{type(exc).__name__}: {exc}"
             logger.exception("gmail draft creation failed", extra=log_extra)
@@ -204,6 +243,9 @@ def run_email_drafter_for_lead(
                         gmail_draft_id=gmail_draft_id,
                         gmail_web_link=gmail_web_link,
                         started_at=started_at,
+                        to_recipients=to_recipients,
+                        cc_recipients=cc_recipients,
+                        signature_appended=signature_appended,
                     ),
                     mime_type="text/markdown",
                 )
@@ -235,6 +277,9 @@ def run_email_drafter_for_lead(
         drive_file_id=drive_file_id,
         drive_web_link=drive_web_link,
         drive_error=drive_error,
+        to_recipients=to_recipients,
+        cc_recipients=cc_recipients,
+        signature_appended=signature_appended,
         started_at=started_at,
         finished_at=finished_at,
     )
@@ -306,6 +351,24 @@ def _resolve_email_drafts_folder(
     return drafts_folder
 
 
+def _strip_team_signoff(body: str) -> str:
+    """
+    Drop a trailing "— C-HAWQ team" sign-off (and common dash variants)
+    from the draft body so an appended live signature doesn't make the
+    email close twice. Only the LAST non-blank line is considered, and
+    only when it's the sign-off — anything else is left untouched.
+    """
+    lines = body.rstrip().split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines:
+        last = lines[-1].strip().lower()
+        normalized = last.lstrip("-—– ").strip()
+        if normalized in {"c-hawq team", "the c-hawq team", "c-hawq"}:
+            lines.pop()
+    return "\n".join(lines).rstrip()
+
+
 def _format_drive_record(
     *,
     run_id: str,
@@ -314,6 +377,9 @@ def _format_drive_record(
     gmail_draft_id: Optional[str],
     gmail_web_link: Optional[str],
     started_at: datetime,
+    to_recipients: Optional[list[str]] = None,
+    cc_recipients: Optional[list[str]] = None,
+    signature_appended: bool = False,
 ) -> str:
     """
     Markdown record file for the Drive audit trail. Frontmatter carries
@@ -334,6 +400,9 @@ def _format_drive_record(
         f"contact: {contact_name}",
         f"organization: {input_.contact_organization}",
         f"municipality: {input_.contact_municipality or '(unset)'}",
+        f"to: {', '.join(to_recipients) if to_recipients else '(none)'}",
+        f"cc: {', '.join(cc_recipients) if cc_recipients else '(none)'}",
+        f"signature_appended: {str(signature_appended).lower()}",
         f"triggering_event: {input_.triggering_event}",
         f"context_chunk_count: {draft.context_chunk_count}",
         f"input_tokens: {draft.input_tokens}",
@@ -417,6 +486,22 @@ def run_email_drafter_for_ghl_payload(payload: dict[str, Any]) -> None:
         )
 
 
+def _parse_recipient_field(value: Any) -> Optional[list[str]]:
+    """
+    Normalize a payload recipient field into a list of addresses. Accepts
+    a list already, or a comma/semicolon-separated string. Returns None
+    when nothing usable is present so the dataclass default applies.
+    """
+    if not value:
+        return None
+    if isinstance(value, str):
+        parts = re.split(r"[,;]", value)
+    else:
+        parts = list(value)
+    cleaned = [p.strip() for p in parts if p and str(p).strip()]
+    return cleaned or None
+
+
 def _payload_to_input(payload: dict[str, Any]) -> EmailDrafterInput:
     """Map a GHL workflow payload (flat snake_case) into EmailDrafterInput."""
     contact_id = payload.get("contact_id") or payload.get("id") or "unknown"
@@ -438,6 +523,14 @@ def _payload_to_input(payload: dict[str, Any]) -> EmailDrafterInput:
         contact_organization=payload.get("company") or "(unknown organization)",
         contact_municipality=municipality_slug,
         contact_email=payload.get("email") or None,
+        # Extra recipients can ride on the payload as comma-separated
+        # strings or lists. `email` still seeds the primary To via the
+        # input's resolved_to_recipients() fallback, so existing
+        # single-contact workflows are unaffected.
+        to_recipients=_parse_recipient_field(payload.get("to_recipients")),
+        cc_recipients=_parse_recipient_field(
+            payload.get("cc_recipients") or payload.get("cc")
+        ),
         from_user=payload.get("from_user") or None,
         triggering_event=payload.get("triggering_event") or "(no event specified)",
         triggering_event_date=payload.get("triggering_event_date") or None,
@@ -454,10 +547,10 @@ def _safe_put_agent_run(
 ) -> None:
     """
     Best-effort write to the agent_runs collection. Logging-only on
-    failure — the run itself is the source of truth, the Firestore
+    failure - the run itself is the source of truth, the Firestore
     record is an audit trail.
     """
-    
+
     duration_seconds: Optional[float] = None
     if result.started_at and result.finished_at:
         duration_seconds = (result.finished_at - result.started_at).total_seconds()
@@ -473,6 +566,9 @@ def _safe_put_agent_run(
         "duration_seconds": duration_seconds,
         "from_user": input_.from_user,
         "contact_email": input_.contact_email,
+        "to_recipients": result.to_recipients,
+        "cc_recipients": result.cc_recipients,
+        "signature_appended": result.signature_appended,
         "contact_municipality": input_.contact_municipality,
         "triggering_event": input_.triggering_event,
         "gmail_draft_id": result.gmail_draft_id,
@@ -502,6 +598,6 @@ def _safe_put_agent_run(
         put_agent_run(result.run_id, record)
     except Exception:
         logger.exception(
-            "agent_runs write failed — run not logged",
+            "agent_runs write failed - run not logged",
             extra={"run_id": result.run_id, "contact_id": input_.contact_id},
         )

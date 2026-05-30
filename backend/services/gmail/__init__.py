@@ -1,4 +1,4 @@
 """Gmail service — DWD-backed draft creation for the Email Drafter agent."""
-from .client import create_draft, resolve_from_user
+from .client import create_draft, get_signature, resolve_from_user
 
-__all__ = ["create_draft", "resolve_from_user"]
+__all__ = ["create_draft", "get_signature", "resolve_from_user"]

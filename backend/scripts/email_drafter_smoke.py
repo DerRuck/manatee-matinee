@@ -1,7 +1,7 @@
 """
 Email Drafter end-to-end smoke.
 
-Runs the orchestrated pipeline (agent → Gmail draft → Drive record →
+Runs the orchestrated pipeline (agent -> Gmail draft -> Drive record ->
 agent_runs) on one lead. Defaults to a Rookery Bay lead so you can run
 it without typing all the args; override anything via flags.
 
@@ -16,12 +16,27 @@ Usage from backend/:
         --triggering-event "Florida Stormwater Conference 2026" \
         --triggering-event-summary "Discussed regional canal sediment loading."
 
-    # Prompt-iteration mode — skips Gmail and Drive writes
+    # Multiple recipients (the FIRST To is who the email is personalized to).
+    # --to / --cc accept repeats and/or comma-separated lists. --email still
+    # seeds the primary To when --to is omitted.
+    python -m scripts.email_drafter_smoke \
+        --email nick@rookerybay.gov \
+        --cc "boss@rookerybay.gov, grants@rookerybay.gov"
+
+    python -m scripts.email_drafter_smoke \
+        --to nick@rookerybay.gov --to jane@rookerybay.gov \
+        --cc director@rookerybay.gov
+
+    # Skip the live Gmail signature append (drafts the prompt body as-is)
+    python -m scripts.email_drafter_smoke --no-signature
+
+    # Prompt-iteration mode -- skips Gmail and Drive writes
     python -m scripts.email_drafter_smoke --no-draft --no-record
 
-Output: prints the JSON model output, the Gmail draft web_link (if
+Output: prints the JSON model output, the resolved To/Cc recipients,
+whether a live signature was appended, the Gmail draft web_link (if
 created), and the Drive web link (if written). Inspects the result's
-status field — `completed` means everything landed; `partial` means the
+status field -- `completed` means everything landed; `partial` means the
 draft was generated but at least one side-effect failed; `failed` means
 the model call itself errored.
 
@@ -30,8 +45,11 @@ Prereqs:
     GMAIL_SIMMER_DEFAULT_USER (optional override).
   - Local IAM: roles/iam.serviceAccountTokenCreator on chawq-api-runtime
     for whichever user `gcloud auth list` reports as active.
-  - Workspace: domain-wide delegation configured for chawq-api-runtime
-    with scope https://www.googleapis.com/auth/gmail.compose (done 5/8).
+  - Workspace domain-wide delegation for chawq-api-runtime:
+      https://www.googleapis.com/auth/gmail.compose        (draft creation, 5/8)
+      https://www.googleapis.com/auth/gmail.settings.basic  (signature read, 5/29)
+    Without gmail.settings.basic the signature fetch fails gracefully and
+    the draft is created without a signature.
 """
 from __future__ import annotations
 
@@ -57,7 +75,7 @@ logging.basicConfig(
 logger = logging.getLogger("email_drafter_smoke")
 
 
-# Hardcoded Rookery Bay defaults — easy to invoke without flags.
+# Hardcoded Rookery Bay defaults -- easy to invoke without flags.
 DEFAULT_INPUT = EmailDrafterInput(
     contact_id="rookery_bay_smoke_contact",
     contact_first_name="Jane",
@@ -65,7 +83,7 @@ DEFAULT_INPUT = EmailDrafterInput(
     contact_title="Stewardship Coordinator",
     contact_organization="Rookery Bay NERR",
     contact_municipality="rookery_bay_fl",
-    contact_email="tyler@chawq.org",  # safe default — sends draft to ourselves
+    contact_email="tyler@chawq.org",  # safe default -- sends draft to ourselves
     triggering_event="Florida Stormwater Conference 2026",
     triggering_event_date="2026-05-05",
     triggering_event_summary=(
@@ -74,6 +92,19 @@ DEFAULT_INPUT = EmailDrafterInput(
     ),
     from_user=None,  # falls back to GMAIL_SIMMER_DEFAULT_USER
 )
+
+
+def _flatten_recipients(values: list[str] | None) -> list[str] | None:
+    """
+    Turn repeated and/or comma-separated --to/--cc flags into a flat list.
+    Returns None when nothing was passed so the dataclass default applies.
+    """
+    if not values:
+        return None
+    out: list[str] = []
+    for chunk in values:
+        out.extend(part.strip() for part in chunk.split(",") if part.strip())
+    return out or None
 
 
 def main() -> None:
@@ -85,6 +116,21 @@ def main() -> None:
     parser.add_argument("--organization", default=DEFAULT_INPUT.contact_organization)
     parser.add_argument("--municipality", default=DEFAULT_INPUT.contact_municipality)
     parser.add_argument("--email", default=DEFAULT_INPUT.contact_email)
+    parser.add_argument(
+        "--to",
+        action="append",
+        default=None,
+        help="Primary recipient(s). Repeatable and/or comma-separated. "
+        "The first address is who the email is personalized to. When "
+        "omitted, --email is the sole To.",
+    )
+    parser.add_argument(
+        "--cc",
+        action="append",
+        default=None,
+        help="Cc recipient(s). Repeatable and/or comma-separated. "
+        "Addresses already on the To line are dropped automatically.",
+    )
     parser.add_argument(
         "--triggering-event", default=DEFAULT_INPUT.triggering_event
     )
@@ -99,6 +145,11 @@ def main() -> None:
         "--from-user",
         default=DEFAULT_INPUT.from_user,
         help="Gmail mailbox to impersonate (defaults to GMAIL_SIMMER_DEFAULT_USER).",
+    )
+    parser.add_argument(
+        "--no-signature",
+        action="store_true",
+        help="Don't fetch/append the from_user's live Gmail signature.",
     )
     parser.add_argument(
         "--no-draft",
@@ -120,6 +171,9 @@ def main() -> None:
         contact_organization=args.organization,
         contact_municipality=args.municipality,
         contact_email=args.email,
+        to_recipients=_flatten_recipients(args.to),
+        cc_recipients=_flatten_recipients(args.cc),
+        append_signature=not args.no_signature,
         triggering_event=args.triggering_event,
         triggering_event_date=args.triggering_event_date,
         triggering_event_summary=args.triggering_event_summary,
@@ -137,6 +191,9 @@ def main() -> None:
     print("=" * 72)
     print(f"status:           {result.status}")
     print(f"run_id:           {result.run_id}")
+    print(f"to:               {', '.join(result.to_recipients or []) or '(none)'}")
+    print(f"cc:               {', '.join(result.cc_recipients or []) or '(none)'}")
+    print(f"signature_added:  {result.signature_appended}")
     if result.draft:
         print(f"model:            {result.draft.model}")
         print(f"input_tokens:     {result.draft.input_tokens}")
@@ -168,7 +225,7 @@ def main() -> None:
         print(f"error:            {result.error}")
     print("=" * 72)
 
-    # Non-zero exit if anything didn't land — useful for shell pipelines.
+    # Non-zero exit if anything didn't land -- useful for shell pipelines.
     if result.status == "failed":
         sys.exit(1)
     if result.status == "partial":
