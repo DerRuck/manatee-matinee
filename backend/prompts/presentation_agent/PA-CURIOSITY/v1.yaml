@@ -125,6 +125,12 @@ system: |
   - findings.outline_type MUST be "PA-CURIOSITY".
   - slide_number values MUST be 1..N with no gaps.
   - First slide MUST be layout="title". Last slide MUST be layout="closing".
+  - Slide 2 (Why this place, why now) MUST be layout="three_pillar" or
+    layout="data_point". layout="bullet" is NOT permitted here.
+  - Slide 3 (What C-HAWQ does) MUST be layout="three_pillar". layout="bullet"
+    is NOT permitted here.
+  - No more than 2 slides in the entire deck may use layout="bullet". Use
+    three_pillar, data_point, comparable_project, or quote for content slides.
   - speaker_notes should describe what to SAY, not what's on the slide.
   - Every DataPointSlide and (when used) ComparableProjectSlide MUST have
     at least one source.
