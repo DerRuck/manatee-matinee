@@ -93,6 +93,16 @@ def main() -> None:
         choices=list(SOURCE_CONFIGS.keys()) + ["all"],
         help="Source key. 'all' walks every registered source's subfolder under root.",
     )
+    parser.add_argument(
+        "--folder-is-root",
+        action="store_true",
+        help="Treat --folder-id as the PARENT root and locate this source's "
+             "named subfolder (SourceConfig.folder_name) under it, instead of "
+             "walking --folder-id directly. Use this so a stable root ID keeps "
+             "working even if the source subfolder is deleted + recreated with "
+             "a new ID. Ignored for --source all (which always treats folder-id "
+             "as the root).",
+    )
     args = parser.parse_args()
 
     stats = IngestStats()
@@ -101,7 +111,26 @@ def main() -> None:
     if args.source == "all":
         _ingest_all_sources(args.folder_id, stats)
     else:
-        _ingest_source_folder(args.folder_id, args.source, stats)
+        target_folder_id = args.folder_id
+        if args.folder_is_root:
+            cfg = SOURCE_CONFIGS[args.source]
+            sub_id = _find_subfolder(args.folder_id, cfg.folder_name)
+            if sub_id is None:
+                logger.error(
+                    "no subfolder named '%s' under root %s -- nothing to ingest",
+                    cfg.folder_name,
+                    args.folder_id,
+                )
+                sys.exit(1)
+            logger.info(
+                "resolved source=%s subfolder '%s' -> %s (under root %s)",
+                args.source,
+                cfg.folder_name,
+                sub_id,
+                args.folder_id,
+            )
+            target_folder_id = sub_id
+        _ingest_source_folder(target_folder_id, args.source, stats)
 
     elapsed = time.monotonic() - started
     logger.info(

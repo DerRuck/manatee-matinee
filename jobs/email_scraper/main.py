@@ -21,10 +21,25 @@ TARGET_INBOXES = [
     'logan@chawq.org'
 ]
 
-SCOPES = [
-    'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/gmail.modify',
-]
+# Gmail is read per-mailbox (impersonate each inbox). gmail.modify is
+# enough to read + touch labels.
+GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+
+# Drive uses the FULL `drive` scope, not `drive.file`. Under drive.file,
+# files().list only returns files the calling identity created -- so a
+# different identity (a manual run vs the SA, or one mailbox-subject vs
+# another) can't see existing folders and find-or-create spawns duplicate
+# YYYY-MM folders, and dedup misses files written by other identities.
+# Full `drive` scope sees everything in the shared drive regardless of
+# creator. Requires this scope authorized on the SA's client ID in the
+# Workspace admin domain-wide-delegation config.
+DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
+
+# Single mailbox identity used for ALL Drive operations (folder
+# find-or-create, file writes, dedup lookups) so they share one
+# consistent view. Must be a shared-drive member with write access.
+# Defaults to the first target inbox; override via env if needed.
+DRIVE_IMPERSONATE_USER = os.getenv("DRIVE_IMPERSONATE_USER", TARGET_INBOXES[0])
 
 LOOKBACK_DAYS = os.getenv("LOOKBACK_DAYS", "1").strip()
 LIST_PAGE_SIZE = 500
@@ -131,18 +146,31 @@ METADATA_HEADERS = [
 ]
 
 
-def get_services(target_user):
+def _delegated_creds(target_scopes, subject):
     base_creds, _ = google.auth.default()
-    delegated_creds = impersonated_credentials.Credentials(
+    return impersonated_credentials.Credentials(
         source_credentials=base_creds,
         target_principal=SERVICE_ACCOUNT_EMAIL,
-        target_scopes=SCOPES,
-        subject=target_user,
+        target_scopes=target_scopes,
+        subject=subject,
         lifetime=3600,
     )
-    gmail = build('gmail', 'v1', credentials=delegated_creds)
-    drive = build('drive', 'v3', credentials=delegated_creds)
-    return gmail, drive
+
+
+def get_gmail_service(target_user):
+    """Gmail client impersonating one mailbox (per-inbox read)."""
+    return build('gmail', 'v1', credentials=_delegated_creds(GMAIL_SCOPES, target_user))
+
+
+def get_drive_service():
+    """Single Drive client for ALL writes + dedup lookups.
+
+    One fixed identity (DRIVE_IMPERSONATE_USER) + full `drive` scope, so it
+    sees every file in the shared drive regardless of which identity created
+    it. This is what prevents the duplicate-folder / missed-dedup bug that
+    drive.file + per-mailbox identities caused.
+    """
+    return build('drive', 'v3', credentials=_delegated_creds(DRIVE_SCOPES, DRIVE_IMPERSONATE_USER))
 
 
 def get_header(headers, name):
@@ -400,9 +428,10 @@ def process_inboxes(event, context):
     print(f"Lookback: {LOOKBACK_DAYS} day(s)")
     print(f"Gmail query: {GMAIL_QUERY}")
 
+    # One Drive identity for every write + dedup lookup this run.
+    drive = get_drive_service()
     try:
-        _bootstrap_gmail, bootstrap_drive = get_services(TARGET_INBOXES[0])
-        seen_message_ids = list_existing_slugs(bootstrap_drive)
+        seen_message_ids = list_existing_slugs(drive)
         print(f"Pre-seeded {len(seen_message_ids)} existing Message-ID slug(s) from Drive folder.")
     except Exception as e:
         print(f"WARN: could not pre-seed slug set from Drive ({e}); proceeding without it.")
@@ -423,7 +452,7 @@ def process_inboxes(event, context):
     for user_email in TARGET_INBOXES:
         print(f"\n--- Processing Inbox: {user_email} ---")
         try:
-            gmail, drive = get_services(user_email)
+            gmail = get_gmail_service(user_email)
             label_names = fetch_user_label_names(gmail)
             print(f"Loaded {len(label_names)} user label(s) for {user_email}.")
 

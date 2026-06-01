@@ -1,0 +1,89 @@
+# CI for the C-HAWQ scheduled Firestore ingest job.
+#
+# Builds the backend image (from backend/Dockerfile) and (re)deploys a
+# Cloud Run Job that runs scripts.bulk_ingest. Cloud Scheduler fires it
+# every 12h, offset 20m after the inbox scraper so freshly-scraped mail
+# is already sitting in Drive.
+#
+# No new ingestion code: the job runs scripts/bulk_ingest.py, which calls
+# ingest_one_drive_file() (idempotency skip via drive_modified_time, so a
+# 12h sweep only re-embeds new or changed files).
+#
+# _INGEST_ROOT_ID is the AI Infrastructure ROOT, and bulk_ingest runs with
+# --folder-is-root: it resolves the source's named subfolder (e.g.
+# "email-inbox") under the root at run time. The root ID is stable, so this
+# survives the subfolder being deleted + recreated with a new ID (which is
+# what broke the prior hardcoded-subfolder-ID approach on 5/31).
+#   _SOURCE=email_inbox -> resolves + walks the "email-inbox" subfolder.
+#   _SOURCE=all         -> walks every registered source's subfolder.
+# Switching email_inbox -> all is now just _SOURCE=all (root unchanged).
+#
+# Default is the DEV / live "AI Infrastructure" root
+# (1aEXR8orj0s8VmJomQqq22IwC8Y2dAJBZ). Prod has no settled data tree yet
+# (the prod output-folder split is an open loop); pass the prod root
+# explicitly once that's resolved.
+#
+# Override at submit time, e.g. (PowerShell) -- sweep everything:
+#   gcloud builds submit --config jobs/firestore_ingest/cloudbuild.yaml `
+#     --substitutions=_SOURCE=all
+#
+# Cloud Scheduler + IAM are set up once per env, outside this file.
+#
+# Auth: the job runs as the runtime SA. bulk_ingest reaches Drive /
+# Firestore / Vertex (embeddings) via that SA's application-default
+# credentials -- no Anthropic key needed (ingestion does no Claude call).
+
+substitutions:
+  _IMAGE: 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/firestore-ingest:latest'
+  _JOB_NAME: 'chawq-ingest-dev'
+  _REGION: 'us-central1'
+  _RUNTIME_SA: 'chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
+  _SOURCE: 'email_inbox'
+  # AI Infrastructure ROOT. With --folder-is-root, the job resolves the
+  # source's named subfolder (e.g. "email-inbox") under this root at run
+  # time, so it survives the subfolder being deleted + recreated with a new
+  # ID. Switching _SOURCE to 'all' needs no other change -- 'all' already
+  # treats this as the root.
+  _INGEST_ROOT_ID: '1aEXR8orj0s8VmJomQqq22IwC8Y2dAJBZ'
+  _ENV: 'dev'
+
+steps:
+  - id: 'build'
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'backend/Dockerfile', '-t', '${_IMAGE}', 'backend/']
+
+  - id: 'push'
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE}']
+
+  - id: 'deploy-job'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'jobs'
+      - 'deploy'
+      - '${_JOB_NAME}'
+      - '--image=${_IMAGE}'
+      - '--region=${_REGION}'
+      - '--project=chawq-manatee-matinee'
+      - '--service-account=${_RUNTIME_SA}'
+      - '--set-env-vars=ENV=${_ENV},GCP_PROJECT_ID=chawq-manatee-matinee,GCP_LOCATION=us-central1'
+      - '--command=python'
+      - '--args=-m,scripts.bulk_ingest,--source,${_SOURCE},--folder-id,${_INGEST_ROOT_ID},--folder-is-root'
+      - '--max-retries=1'
+      # 1h: the 12h sweep walks the whole tree (skipping unchanged via the
+      # idempotency check), which grows with the corpus. A one-time full
+      # backfill needs more -- bump the live job to ~3h for that, since the
+      # ingest resumes (skips completed docs) and converges across re-runs.
+      - '--task-timeout=3600s'
+
+images:
+  - '${_IMAGE}'
+
+serviceAccount: 'projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'

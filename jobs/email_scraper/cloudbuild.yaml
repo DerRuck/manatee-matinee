@@ -1,14 +1,72 @@
+# CI for the C-HAWQ inbox scraper.
+#
+# Build + push the image, then (re)deploy the Cloud Run Job that Cloud
+# Scheduler fires every 12h. `gcloud run jobs deploy` creates the job if
+# it's absent and updates it in place if it already exists, so this is
+# safe to re-run.
+#
+# Substitutions default to PROD. Override for dev at submit time, e.g.
+# (PowerShell):
+#   gcloud builds submit --config jobs/email_scraper/cloudbuild.yaml `
+#     --substitutions=_JOB_NAME=chawq-inbox-scraper-dev,_SHARED_DRIVE_FOLDER_ID=1aEXR8orj0s8VmJomQqq22IwC8Y2dAJBZ
+#
+# Set up ONCE per env, outside this file (we walk through these live):
+#   - Cloud Scheduler job: run this Cloud Run Job on `0 */12 * * *`.
+#   - IAM: the runtime SA needs roles/iam.serviceAccountTokenCreator on
+#     the domain-wide-delegation scraper SA (_SCRAPER_SA_EMAIL).
+#   - Domain-wide delegation scopes authorized for _SCRAPER_SA_EMAIL in
+#     the Workspace admin console: gmail.modify AND the FULL drive scope
+#     (https://www.googleapis.com/auth/drive) -- NOT drive.file. The full
+#     scope is required so the single Drive identity sees existing folders
+#     regardless of creator (the duplicate-folder fix).
+#   - _SHARED_DRIVE_FOLDER_ID MUST equal the env's DRIVE_WATCH_FOLDER_ID,
+#     or scraped mail lands outside the ingested tree.
+
+substitutions:
+  _IMAGE: 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest'
+  _JOB_NAME: 'chawq-inbox-scraper'
+  _REGION: 'us-central1'
+  _RUNTIME_SA: 'chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
+  # Domain-wide-delegation SA the scraper impersonates for Gmail. Replace
+  # with the real value (or override at submit time).
+  _SCRAPER_SA_EMAIL: 'chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
+  _SHARED_DRIVE_FOLDER_ID: '1aEXR8orj0s8VmJomQqq22IwC8Y2dAJBZ'
+  _LOOKBACK_DAYS: '1'
+
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
+  - id: 'build'
+    name: 'gcr.io/cloud-builders/docker'
     dir: 'jobs/email_scraper'
-    args: ['build', '-t', 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest', '.']
-  - name: 'gcr.io/cloud-builders/docker'
-    dir: 'jobs/email_scraper'
-    args: ['push', 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest']
+    args: ['build', '-t', '${_IMAGE}', '.']
+
+  - id: 'push'
+    name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE}']
+
+  - id: 'deploy-job'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'jobs'
+      - 'deploy'
+      - '${_JOB_NAME}'
+      - '--image=${_IMAGE}'
+      - '--region=${_REGION}'
+      - '--project=chawq-manatee-matinee'
+      - '--service-account=${_RUNTIME_SA}'
+      - '--set-env-vars=SERVICE_ACCOUNT_EMAIL=${_SCRAPER_SA_EMAIL},SHARED_DRIVE_FOLDER_ID=${_SHARED_DRIVE_FOLDER_ID},LOOKBACK_DAYS=${_LOOKBACK_DAYS}'
+      - '--max-retries=1'
+      # 1h: a full multi-month backfill across all inboxes exceeds 900s.
+      # Daily delta runs finish in seconds; the headroom is only for backfills.
+      - '--task-timeout=3600s'
+
 images:
-  - 'us-central1-docker.pkg.dev/chawq-manatee-matinee/internal-tools/inbox-scraper:latest'
+  - '${_IMAGE}'
 
 serviceAccount: 'projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
 
 options:
   logging: CLOUD_LOGGING_ONLY
+
+timeout: '1200s'
