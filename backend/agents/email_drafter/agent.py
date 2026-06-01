@@ -104,6 +104,11 @@ class EmailDrafterInput:
     # Retrieval filter overrides. Default behavior is "filter by
     # municipality and pull the top N chunks." Tests / specialized
     # callers can override.
+    # Reply mode: the prior thread rendered as text, used as the
+    # model's primary context when drafting an in-thread reply.
+    # None for the Simmer flow.
+    thread_text: Optional[str] = None
+
     context_chunk_limit: int = 8
     context_filter_municipalities: Optional[list[str]] = None
     context_filter_contact_ids: Optional[list[str]] = None
@@ -168,8 +173,8 @@ class EmailDrafterAgent(BaseAgent):
     BaseAgent stays available for testing the prompt in isolation.
     """
 
-    def __init__(self, version: int = 1) -> None:
-        super().__init__("email_drafter", version)
+    def __init__(self, version: int = 1, prompt_name: str = "email_drafter") -> None:
+        super().__init__(prompt_name, version)
 
     def run_for_lead(self, input_: EmailDrafterInput) -> EmailDraftResult:
         """
@@ -209,6 +214,42 @@ class EmailDrafterAgent(BaseAgent):
             to_recipients=input_.resolved_to_recipients(),
             cc_recipients=input_.resolved_cc_recipients(),
         )
+
+    def run_reply(self, input_: EmailDrafterInput) -> EmailDraftResult:
+        """
+        Draft an in-thread reply. Same shape as run_for_lead, but the user
+        message centers on the prior thread (input_.thread_text) plus the
+        sender's intent (triggering_event / triggering_event_summary). Org
+        context chunks are still pulled (municipality-scoped) as background.
+        Reuses the JSON parser and EmailDraftResult. Construct the agent with
+        prompt_name="email_drafter_reply" so the reply system prompt loads.
+        """
+        context_chunks = _retrieve_context_chunks(input_)
+        user_message = _build_reply_message(input_, context_chunks)
+
+        result = self.run(user_message)
+        parsed = _parse_email_json(result.content)
+
+        return EmailDraftResult(
+            subject=parsed["subject"],
+            body=parsed["body"],
+            tone_notes=parsed["tone_notes"],
+            suggested_send=parsed["suggested_send"],
+            suggested_send_reason=parsed["suggested_send_reason"],
+            context_chunk_count=len(context_chunks),
+            raw_model_output=result.content,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+            cache_read_tokens=result.cache_read_tokens,
+            prompt_version=self.config.version,
+            model=result.model,
+            from_user=input_.from_user,
+            contact_email=input_.contact_email,
+            to_recipients=input_.resolved_to_recipients(),
+            cc_recipients=input_.resolved_cc_recipients(),
+        )
+
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +350,54 @@ def _build_user_message(
     lines.append(
         "Draft the Simmer email per the system prompt. Return JSON only — "
         "no markdown fences, no preamble, no trailing commentary."
+    )
+    return "\n".join(lines)
+
+
+def _build_reply_message(
+    input_: EmailDrafterInput,
+    context_chunks: list[dict[str, Any]],
+) -> str:
+    """Render the prior thread + reply intent + org context for reply mode."""
+    lines: list[str] = []
+    lines.append(f"TODAY'S DATE: {today_iso_date()}")
+    lines.append("")
+    lines.append("YOU ARE DRAFTING A REPLY to the email thread below.")
+    lines.append("")
+    lines.append("LEAD PROFILE")
+    lines.append(f"  First name: {input_.contact_first_name}")
+    lines.append(f"  Last name: {input_.contact_last_name}")
+    if input_.contact_title:
+        lines.append(f"  Title: {input_.contact_title}")
+    lines.append(f"  Organization: {input_.contact_organization}")
+
+    lines.append("")
+    lines.append("WHAT TO CONVEY IN THE REPLY")
+    lines.append(f"  {input_.triggering_event}")
+    if input_.triggering_event_summary:
+        lines.append(f"  {input_.triggering_event_summary}")
+
+    lines.append("")
+    lines.append("PRIOR THREAD (oldest to newest)")
+    if input_.thread_text:
+        for ln in input_.thread_text.splitlines():
+            lines.append(f"  {ln}")
+    else:
+        lines.append("  (thread text unavailable)")
+
+    lines.append("")
+    lines.append("ORG CONTEXT (from C-HAWQ knowledge base)")
+    if not context_chunks:
+        lines.append("  (none retrieved)")
+    else:
+        for i, chunk in enumerate(context_chunks, start=1):
+            text = (chunk.get("text") or "").strip()
+            lines.append(f"  [{i}] {text}")
+
+    lines.append("")
+    lines.append(
+        "Draft the reply per the system prompt. Return JSON only - no "
+        "markdown fences, no preamble, no trailing commentary."
     )
     return "\n".join(lines)
 

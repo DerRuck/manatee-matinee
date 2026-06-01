@@ -58,11 +58,12 @@ logger = logging.getLogger(__name__)
 SA_EMAIL = "chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GMAIL_SETTINGS_SCOPE = "https://www.googleapis.com/auth/gmail.settings.basic"
+GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 
 # Both scopes ride on every delegated credential. The compose scope can't
 # read settings and the settings scope can't compose, so the token needs
 # both for a single client to draft and fetch signatures.
-GMAIL_SCOPES = [GMAIL_COMPOSE_SCOPE, GMAIL_SETTINGS_SCOPE]
+GMAIL_SCOPES = [GMAIL_COMPOSE_SCOPE, GMAIL_SETTINGS_SCOPE, GMAIL_MODIFY_SCOPE]
 
 Recipients = Union[str, list, None]
 
@@ -170,6 +171,146 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
+def _header_map(headers: list) -> dict:
+    """Lower-cased name->value map for a message payload's headers."""
+    out = {}
+    for h in headers or []:
+        name = (h.get("name") or "").lower()
+        if name and name not in out:
+            out[name] = h.get("value") or ""
+    return out
+
+
+def _decode_b64(data: str) -> str:
+    if not data:
+        return ""
+    try:
+        return base64.urlsafe_b64decode(data.encode("ascii")).decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def _extract_plain_text(payload: dict) -> str:
+    """Walk a message payload, returning text/plain (HTML stripped as fallback)."""
+    if not payload:
+        return ""
+    mime = payload.get("mimeType", "")
+    body = payload.get("body", {}) or {}
+    if mime == "text/plain" and body.get("data"):
+        return _decode_b64(body["data"])
+    parts = payload.get("parts") or []
+    for part in parts:
+        if part.get("mimeType") == "text/plain":
+            t = _extract_plain_text(part)
+            if t.strip():
+                return t
+    for part in parts:
+        if part.get("mimeType") == "text/html" and (part.get("body") or {}).get("data"):
+            return _html_to_text(_decode_b64(part["body"]["data"]))
+        nested = _extract_plain_text(part)
+        if nested.strip():
+            return nested
+    if mime == "text/html" and body.get("data"):
+        return _html_to_text(_decode_b64(body["data"]))
+    return ""
+
+
+def _re_subject(subject: str) -> str:
+    s = (subject or "").strip()
+    if s.lower().startswith("re:"):
+        return s
+    return f"Re: {s}" if s else "Re:"
+
+
+def _split_addrs(addr_header: Optional[str]) -> list:
+    return [a.strip() for a in (addr_header or "").split(",") if a.strip()]
+
+
+def get_thread(from_user: str, thread_id: str) -> dict:
+    """
+    Read a Gmail thread and return everything needed to draft an in-thread
+    reply. Requires the gmail.modify (or readonly) DWD scope.
+
+    Returns: thread_id, subject (Re:-prefixed), reply_to (last sender),
+    in_reply_to (last Message-ID), references (chain to set on the reply),
+    participants {to[], cc[]} off the last message, and text (the thread
+    rendered oldest->newest for model context).
+    """
+    service = _get_gmail_service(from_user)
+    thread = (
+        service.users().threads().get(userId="me", id=thread_id, format="full").execute()
+    )
+    messages = thread.get("messages", []) or []
+    if not messages:
+        raise ValueError(f"thread {thread_id} has no messages")
+
+    rendered = []
+    for m in messages:
+        h = _header_map((m.get("payload") or {}).get("headers", []))
+        text = _extract_plain_text(m.get("payload") or {}).strip()
+        rendered.append(
+            f"From: {h.get('from','')}\nDate: {h.get('date','')}\n"
+            f"Subject: {h.get('subject','')}\n\n{text}"
+        )
+
+    last = messages[-1]
+    lh = _header_map((last.get("payload") or {}).get("headers", []))
+    last_msg_id = lh.get("message-id", "")
+    prior_refs = lh.get("references", "")
+    references = (prior_refs + " " + last_msg_id).strip() if last_msg_id else prior_refs
+
+    return {
+        "thread_id": thread_id,
+        "subject": _re_subject(lh.get("subject", "")),
+        "reply_to": lh.get("reply-to") or lh.get("from", ""),
+        "in_reply_to": last_msg_id,
+        "references": references,
+        "participants": {"to": _split_addrs(lh.get("to")), "cc": _split_addrs(lh.get("cc"))},
+        "text": "\n\n---\n\n".join(rendered),
+    }
+
+
+def search_contact_threads(
+    from_user: str, contact_email: str, max_results: int = 10
+) -> list:
+    """
+    Find recent threads involving `contact_email` in `from_user`'s mailbox
+    (newest first) for the workbook to surface as reply candidates. Returns
+    {thread_id, subject, from, date, snippet} per thread, de-duped.
+    Requires gmail.modify (or readonly).
+    """
+    service = _get_gmail_service(from_user)
+    q = f"from:{contact_email} OR to:{contact_email}"
+    listing = (
+        service.users().messages()
+        .list(userId="me", q=q, maxResults=max_results * 3)
+        .execute()
+    )
+    out, seen = [], set()
+    for ref in listing.get("messages", []) or []:
+        tid = ref.get("threadId")
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        msg = (
+            service.users().messages()
+            .get(userId="me", id=ref["id"], format="metadata",
+                 metadataHeaders=["Subject", "From", "Date"])
+            .execute()
+        )
+        h = _header_map((msg.get("payload") or {}).get("headers", []))
+        out.append({
+            "thread_id": tid,
+            "subject": h.get("subject", ""),
+            "from": h.get("from", ""),
+            "date": h.get("date", ""),
+            "snippet": msg.get("snippet", ""),
+        })
+        if len(out) >= max_results:
+            break
+    return out
+
+
 def create_draft(
     from_user: str,
     to: Recipients,
@@ -178,6 +319,8 @@ def create_draft(
     cc: Recipients = None,
     signature_html: Optional[str] = None,
     thread_id: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ) -> dict:
     """
     Create a Gmail draft in `from_user`'s mailbox.
@@ -229,6 +372,10 @@ def create_draft(
         msg["Cc"] = ", ".join(cc_list)
     msg["From"] = from_user
     msg["Subject"] = subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
 
     raw_b64 = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 

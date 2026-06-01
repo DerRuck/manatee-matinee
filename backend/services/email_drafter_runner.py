@@ -39,7 +39,13 @@ from agents.email_drafter import (
 from core.settings import get_settings
 from services.drive.client import find_or_create_folder, upload_text_file
 from services.firestore.client import put_agent_run
-from services.gmail import create_draft, get_signature, resolve_from_user
+from services.gmail import (
+    create_draft,
+    get_signature,
+    get_thread,
+    resolve_from_user,
+    search_contact_threads,
+)
 from utils.municipality import slug_for_municipality, slugify
 
 logger = logging.getLogger(__name__)
@@ -74,6 +80,10 @@ class EmailDrafterRunResult:
     to_recipients: Optional[list[str]] = None
     cc_recipients: Optional[list[str]] = None
     signature_appended: bool = False
+    agent_name: str = "email_drafter"
+    thread_id: Optional[str] = None
+    thread_subject: Optional[str] = None
+    thread_candidates: Optional[list] = None
 
     # Drive record side-effect.
     drive_file_id: Optional[str] = None
@@ -557,7 +567,7 @@ def _safe_put_agent_run(
 
     record: dict = {
         "run_id": result.run_id,
-        "agent": "email_drafter",
+        "agent": result.agent_name,
         "agent_version": 1,
         "contact_id": input_.contact_id,
         "status": result.status,
@@ -569,6 +579,8 @@ def _safe_put_agent_run(
         "to_recipients": result.to_recipients,
         "cc_recipients": result.cc_recipients,
         "signature_appended": result.signature_appended,
+        "thread_id": result.thread_id,
+        "thread_subject": result.thread_subject,
         "contact_municipality": input_.contact_municipality,
         "triggering_event": input_.triggering_event,
         "gmail_draft_id": result.gmail_draft_id,
@@ -601,3 +613,179 @@ def _safe_put_agent_run(
             "agent_runs write failed - run not logged",
             extra={"run_id": result.run_id, "contact_id": input_.contact_id},
         )
+
+
+def _extract_email(addr: str) -> str:
+    """Pull the bare address out of a 'Name <a@x.com>' header value."""
+    if not addr:
+        return ""
+    m = re.search(r"<([^>]+)>", addr)
+    if m:
+        return m.group(1).strip()
+    return addr.strip()
+
+
+def run_email_reply_for_lead(
+    input_: EmailDrafterInput,
+    *,
+    thread_id: str | None = None,
+    contact_email_for_search: str | None = None,
+    skip_gmail: bool = False,
+    skip_drive: bool = False,
+    run_id: str | None = None,
+) -> EmailDrafterRunResult:
+    """
+    Draft an in-thread reply for one lead.
+
+    Thread resolution: `thread_id` wins; otherwise search the from_user's
+    mailbox for threads with the contact (newest first) and reply to the
+    most recent, returning the full candidate list on the result so the
+    workbook can surface "replied to X; here are others" for confirmation
+    (safe — nothing is sent). Recipients default to the last sender only
+    (CC via the input's cc_recipients). Subject + In-Reply-To + References
+    come from the thread so the draft threads correctly in every client.
+    Never raises — failures land on the result object.
+    """
+    run_id = run_id or str(uuid.uuid4())
+    started_at = datetime.now(tz=timezone.utc)
+    log_extra = {"run_id": run_id, "contact_id": input_.contact_id, "agent": "email_drafter_reply"}
+
+    from_user = resolve_from_user(input_.from_user)
+
+    # 1. Resolve the thread.
+    candidates: list = []
+    try:
+        if not thread_id:
+            search_email = contact_email_for_search or input_.contact_email
+            if not search_email:
+                raise ValueError("reply needs a thread_id or a contact email to search")
+            if search_email.strip().lower() == from_user.lower():
+                raise ValueError(
+                    "search email equals the mailbox (from_user) — pass a thread_id "
+                    "or a real counterparty email; searching your own address matches "
+                    "every thread"
+                )
+            candidates = search_contact_threads(from_user, search_email)
+            if not candidates:
+                raise ValueError(f"no threads found involving {search_email}")
+            thread_id = candidates[0]["thread_id"]  # newest
+        thread = get_thread(from_user, thread_id)
+    except Exception as exc:
+        finished_at = datetime.now(tz=timezone.utc)
+        result = EmailDrafterRunResult(
+            run_id=run_id, contact_id=input_.contact_id, status="failed",
+            agent_name="email_drafter_reply",
+            error=f"thread resolution failed: {type(exc).__name__}: {exc}",
+            thread_candidates=candidates or None,
+            started_at=started_at, finished_at=finished_at,
+        )
+        _safe_put_agent_run(result, input_)
+        return result
+
+    input_.thread_text = thread["text"]
+
+    # 2. Model call (reply prompt).
+    try:
+        agent = EmailDrafterAgent(prompt_name="email_drafter_reply", version=1)
+        draft = agent.run_reply(input_)
+    except Exception as exc:
+        logger.exception("email_drafter_reply agent failed", extra=log_extra)
+        finished_at = datetime.now(tz=timezone.utc)
+        result = EmailDrafterRunResult(
+            run_id=run_id, contact_id=input_.contact_id, status="failed",
+            agent_name="email_drafter_reply", error=f"{type(exc).__name__}: {exc}",
+            thread_id=thread.get("thread_id"), thread_subject=thread.get("subject"),
+            thread_candidates=candidates or None,
+            started_at=started_at, finished_at=finished_at,
+        )
+        _safe_put_agent_run(result, input_)
+        return result
+
+    # 3. Recipients — sender-only unless the caller set To explicitly.
+    reply_to_email = _extract_email(thread.get("reply_to", ""))
+    to_recipients = input_.resolved_to_recipients() or ([reply_to_email] if reply_to_email else [])
+    cc_recipients = input_.resolved_cc_recipients()
+    signature_appended = False
+
+    gmail_draft_id = gmail_web_link = gmail_error = None
+    drive_file_id = drive_web_link = drive_error = None
+
+    # 4. Gmail draft (threaded).
+    if skip_gmail:
+        logger.info("skipping gmail reply draft (skip_gmail=True)", extra=log_extra)
+    elif not to_recipients:
+        gmail_error = "no reply recipient resolved"
+        logger.warning(gmail_error, extra=log_extra)
+    else:
+        try:
+            signature_html = None
+            if input_.append_signature:
+                try:
+                    signature_html = get_signature(from_user)
+                except Exception as exc:
+                    logger.warning("signature fetch failed — drafting without it: %s",
+                                   f"{type(exc).__name__}: {exc}", extra=log_extra)
+            body_for_draft = _strip_team_signoff(draft.body) if signature_html else draft.body
+            resp = create_draft(
+                from_user=from_user, to=to_recipients, cc=cc_recipients or None,
+                subject=thread["subject"], body=body_for_draft,
+                signature_html=signature_html, thread_id=thread["thread_id"],
+                in_reply_to=thread.get("in_reply_to") or None,
+                references=thread.get("references") or None,
+            )
+            gmail_draft_id = resp.get("id")
+            gmail_web_link = resp.get("web_link")
+            signature_appended = bool(signature_html)
+        except Exception as exc:
+            gmail_error = f"{type(exc).__name__}: {exc}"
+            logger.exception("gmail reply draft creation failed", extra=log_extra)
+
+    # 5. Drive record.
+    if skip_drive:
+        logger.info("skipping drive record (skip_drive=True)", extra=log_extra)
+    else:
+        try:
+            settings = get_settings()
+            output_root = settings.drive_output_root_folder_id
+            if not output_root:
+                drive_error = "DRIVE_OUTPUT_ROOT_FOLDER_ID not set — skipping Drive record"
+                logger.warning(drive_error, extra=log_extra)
+            else:
+                folder = _resolve_email_drafts_folder(input_, output_root)
+                resp = upload_text_file(
+                    folder_id=folder, filename=_build_drive_filename(started_at),
+                    content=_format_drive_record(
+                        run_id=run_id, input_=input_, draft=draft,
+                        gmail_draft_id=gmail_draft_id, gmail_web_link=gmail_web_link,
+                        started_at=started_at, to_recipients=to_recipients,
+                        cc_recipients=cc_recipients, signature_appended=signature_appended,
+                    ),
+                    mime_type="text/markdown",
+                )
+                drive_file_id = resp.get("id")
+                drive_web_link = resp.get("webViewLink")
+        except Exception as exc:
+            drive_error = f"{type(exc).__name__}: {exc}"
+            logger.exception("drive record write failed", extra=log_extra)
+
+    finished_at = datetime.now(tz=timezone.utc)
+    if (not skip_gmail and gmail_error) or (not skip_drive and drive_error):
+        status: RunStatus = "partial"
+    else:
+        status = "completed"
+
+    result = EmailDrafterRunResult(
+        run_id=run_id, contact_id=input_.contact_id, status=status,
+        agent_name="email_drafter_reply", draft=draft,
+        gmail_draft_id=gmail_draft_id, gmail_web_link=gmail_web_link, gmail_error=gmail_error,
+        drive_file_id=drive_file_id, drive_web_link=drive_web_link, drive_error=drive_error,
+        to_recipients=to_recipients, cc_recipients=cc_recipients,
+        signature_appended=signature_appended,
+        thread_id=thread.get("thread_id"), thread_subject=thread.get("subject"),
+        thread_candidates=candidates or None,
+        started_at=started_at, finished_at=finished_at,
+    )
+    _safe_put_agent_run(result, input_)
+    logger.info("email_drafter_reply run complete",
+                extra={**log_extra, "status": status, "thread_id": thread.get("thread_id")})
+    return result

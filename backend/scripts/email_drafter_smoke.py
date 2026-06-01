@@ -2,43 +2,32 @@
 Email Drafter end-to-end smoke.
 
 Runs the orchestrated pipeline (agent -> Gmail draft -> Drive record ->
-agent_runs) on one lead. Defaults to a Rookery Bay lead so you can run
-it without typing all the args; override anything via flags.
+agent_runs) on one lead. Two modes:
+
+  Simmer (default): a fresh post-event follow-up.
+  Reply (--reply):  an in-thread reply, resolved by --thread-id or by
+                    searching the from_user's mailbox for the contact.
 
 Usage from backend/:
-    python -m scripts.email_drafter_smoke
+    python -m scripts.email_drafter_smoke                  # Simmer, defaults
 
-    # Custom lead
+    # Multiple recipients (first To is who it's personalized to)
     python -m scripts.email_drafter_smoke \
-        --first-name Jane --last-name Doe \
-        --organization "SFWMD" --municipality sfwmd_fl \
-        --email jane.doe@example.gov \
-        --triggering-event "Florida Stormwater Conference 2026" \
-        --triggering-event-summary "Discussed regional canal sediment loading."
+        --email nick@rookerybay.gov --cc "boss@rookerybay.gov, grants@rookerybay.gov"
 
-    # Multiple recipients (the FIRST To is who the email is personalized to).
-    # --to / --cc accept repeats and/or comma-separated lists. --email still
-    # seeds the primary To when --to is omitted.
-    python -m scripts.email_drafter_smoke \
-        --email nick@rookerybay.gov \
-        --cc "boss@rookerybay.gov, grants@rookerybay.gov"
-
-    python -m scripts.email_drafter_smoke \
-        --to nick@rookerybay.gov --to jane@rookerybay.gov \
-        --cc director@rookerybay.gov
-
-    # Skip the live Gmail signature append (drafts the prompt body as-is)
+    # Skip the live Gmail signature append
     python -m scripts.email_drafter_smoke --no-signature
+
+    # Reply to a specific thread
+    python -m scripts.email_drafter_smoke --reply --thread-id 1899abc... \
+        --triggering-event "Answer their question about the bathymetry timeline."
+
+    # Reply, letting the agent find the most recent thread with the contact
+    python -m scripts.email_drafter_smoke --reply --reply-to-contact nick@rookerybay.gov \
+        --triggering-event "Confirm we can join the March workshop."
 
     # Prompt-iteration mode -- skips Gmail and Drive writes
     python -m scripts.email_drafter_smoke --no-draft --no-record
-
-Output: prints the JSON model output, the resolved To/Cc recipients,
-whether a live signature was appended, the Gmail draft web_link (if
-created), and the Drive web link (if written). Inspects the result's
-status field -- `completed` means everything landed; `partial` means the
-draft was generated but at least one side-effect failed; `failed` means
-the model call itself errored.
 
 Prereqs:
   - .env: GCP_PROJECT_ID, ANTHROPIC_API_KEY, DRIVE_OUTPUT_ROOT_FOLDER_ID,
@@ -46,10 +35,9 @@ Prereqs:
   - Local IAM: roles/iam.serviceAccountTokenCreator on chawq-api-runtime
     for whichever user `gcloud auth list` reports as active.
   - Workspace domain-wide delegation for chawq-api-runtime:
-      https://www.googleapis.com/auth/gmail.compose        (draft creation, 5/8)
-      https://www.googleapis.com/auth/gmail.settings.basic  (signature read, 5/29)
-    Without gmail.settings.basic the signature fetch fails gracefully and
-    the draft is created without a signature.
+      gmail.compose         (draft creation, 5/8)
+      gmail.settings.basic  (signature read, 5/29)
+      gmail.modify          (thread read for --reply, 5/29)
 """
 from __future__ import annotations
 
@@ -58,7 +46,6 @@ import logging
 import sys
 from pathlib import Path
 
-# Allow running as a script without -m gymnastics.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv  # noqa: E402
@@ -66,7 +53,10 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 from agents.email_drafter import EmailDrafterInput  # noqa: E402
-from services.email_drafter_runner import run_email_drafter_for_lead  # noqa: E402
+from services.email_drafter_runner import (  # noqa: E402
+    run_email_drafter_for_lead,
+    run_email_reply_for_lead,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,7 +65,6 @@ logging.basicConfig(
 logger = logging.getLogger("email_drafter_smoke")
 
 
-# Hardcoded Rookery Bay defaults -- easy to invoke without flags.
 DEFAULT_INPUT = EmailDrafterInput(
     contact_id="rookery_bay_smoke_contact",
     contact_first_name="Jane",
@@ -83,25 +72,22 @@ DEFAULT_INPUT = EmailDrafterInput(
     contact_title="Stewardship Coordinator",
     contact_organization="Rookery Bay NERR",
     contact_municipality="rookery_bay_fl",
-    contact_email="tyler@chawq.org",  # safe default -- sends draft to ourselves
+    contact_email="tyler@chawq.org",  # safe default -- drafts to ourselves
     triggering_event="Florida Stormwater Conference 2026",
     triggering_event_date="2026-05-05",
     triggering_event_summary=(
         "Discussed canal sediment loading on the south estuary and the "
         "regional partner network for habitat monitoring."
     ),
-    from_user=None,  # falls back to GMAIL_SIMMER_DEFAULT_USER
+    from_user=None,
 )
 
 
-def _flatten_recipients(values: list[str] | None) -> list[str] | None:
-    """
-    Turn repeated and/or comma-separated --to/--cc flags into a flat list.
-    Returns None when nothing was passed so the dataclass default applies.
-    """
+def _flatten_recipients(values):
+    """Repeated and/or comma-separated --to/--cc flags -> flat list or None."""
     if not values:
         return None
-    out: list[str] = []
+    out = []
     for chunk in values:
         out.extend(part.strip() for part in chunk.split(",") if part.strip())
     return out or None
@@ -116,51 +102,27 @@ def main() -> None:
     parser.add_argument("--organization", default=DEFAULT_INPUT.contact_organization)
     parser.add_argument("--municipality", default=DEFAULT_INPUT.contact_municipality)
     parser.add_argument("--email", default=DEFAULT_INPUT.contact_email)
-    parser.add_argument(
-        "--to",
-        action="append",
-        default=None,
-        help="Primary recipient(s). Repeatable and/or comma-separated. "
-        "The first address is who the email is personalized to. When "
-        "omitted, --email is the sole To.",
-    )
-    parser.add_argument(
-        "--cc",
-        action="append",
-        default=None,
-        help="Cc recipient(s). Repeatable and/or comma-separated. "
-        "Addresses already on the To line are dropped automatically.",
-    )
-    parser.add_argument(
-        "--triggering-event", default=DEFAULT_INPUT.triggering_event
-    )
-    parser.add_argument(
-        "--triggering-event-date", default=DEFAULT_INPUT.triggering_event_date
-    )
-    parser.add_argument(
-        "--triggering-event-summary",
-        default=DEFAULT_INPUT.triggering_event_summary,
-    )
-    parser.add_argument(
-        "--from-user",
-        default=DEFAULT_INPUT.from_user,
-        help="Gmail mailbox to impersonate (defaults to GMAIL_SIMMER_DEFAULT_USER).",
-    )
-    parser.add_argument(
-        "--no-signature",
-        action="store_true",
-        help="Don't fetch/append the from_user's live Gmail signature.",
-    )
-    parser.add_argument(
-        "--no-draft",
-        action="store_true",
-        help="Skip Gmail draft creation. Useful for prompt iteration.",
-    )
-    parser.add_argument(
-        "--no-record",
-        action="store_true",
-        help="Skip the Drive record write.",
-    )
+    parser.add_argument("--to", action="append", default=None,
+                        help="Primary recipient(s). Repeatable/comma-separated. First = personalized.")
+    parser.add_argument("--cc", action="append", default=None,
+                        help="Cc recipient(s). Repeatable/comma-separated.")
+    parser.add_argument("--triggering-event", default=DEFAULT_INPUT.triggering_event,
+                        help="Simmer: the event. Reply: what to convey.")
+    parser.add_argument("--triggering-event-date", default=DEFAULT_INPUT.triggering_event_date)
+    parser.add_argument("--triggering-event-summary", default=DEFAULT_INPUT.triggering_event_summary)
+    parser.add_argument("--from-user", default=DEFAULT_INPUT.from_user,
+                        help="Gmail mailbox to impersonate (defaults to GMAIL_SIMMER_DEFAULT_USER).")
+    parser.add_argument("--no-signature", action="store_true",
+                        help="Don't fetch/append the from_user's live Gmail signature.")
+    parser.add_argument("--no-draft", action="store_true", help="Skip Gmail draft creation.")
+    parser.add_argument("--no-record", action="store_true", help="Skip the Drive record write.")
+    # Reply mode
+    parser.add_argument("--reply", action="store_true",
+                        help="Draft an in-thread reply instead of a Simmer.")
+    parser.add_argument("--thread-id", default=None,
+                        help="Reply: explicit Gmail thread id (wins over --reply-to-contact).")
+    parser.add_argument("--reply-to-contact", default=None,
+                        help="Reply: search this contact's email for the most recent thread.")
     args = parser.parse_args()
 
     input_ = EmailDrafterInput(
@@ -180,17 +142,35 @@ def main() -> None:
         from_user=args.from_user,
     )
 
-    logger.info("starting email_drafter smoke run")
-    result = run_email_drafter_for_lead(
-        input_,
-        skip_gmail=args.no_draft,
-        skip_drive=args.no_record,
-    )
+    if args.reply:
+        logger.info("starting email_drafter REPLY smoke run")
+        result = run_email_reply_for_lead(
+            input_,
+            thread_id=args.thread_id,
+            contact_email_for_search=args.reply_to_contact,
+            skip_gmail=args.no_draft,
+            skip_drive=args.no_record,
+        )
+    else:
+        logger.info("starting email_drafter smoke run")
+        result = run_email_drafter_for_lead(
+            input_,
+            skip_gmail=args.no_draft,
+            skip_drive=args.no_record,
+        )
 
     print()
     print("=" * 72)
+    print(f"agent:            {result.agent_name}")
     print(f"status:           {result.status}")
     print(f"run_id:           {result.run_id}")
+    if result.thread_id:
+        print(f"thread_id:        {result.thread_id}")
+        print(f"thread_subject:   {result.thread_subject}")
+    if result.thread_candidates:
+        print(f"thread_candidates ({len(result.thread_candidates)}):")
+        for c in result.thread_candidates:
+            print(f"   - {c.get('thread_id')}  {c.get('date')}  {c.get('subject')}")
     print(f"to:               {', '.join(result.to_recipients or []) or '(none)'}")
     print(f"cc:               {', '.join(result.cc_recipients or []) or '(none)'}")
     print(f"signature_added:  {result.signature_appended}")
@@ -198,8 +178,6 @@ def main() -> None:
         print(f"model:            {result.draft.model}")
         print(f"input_tokens:     {result.draft.input_tokens}")
         print(f"output_tokens:    {result.draft.output_tokens}")
-        print(f"cache_creation:   {result.draft.cache_creation_tokens}")
-        print(f"cache_read:       {result.draft.cache_read_tokens}")
         print(f"context_chunks:   {result.draft.context_chunk_count}")
         print(f"suggested_send:   {result.draft.suggested_send}")
         print()
@@ -225,7 +203,6 @@ def main() -> None:
         print(f"error:            {result.error}")
     print("=" * 72)
 
-    # Non-zero exit if anything didn't land -- useful for shell pipelines.
     if result.status == "failed":
         sys.exit(1)
     if result.status == "partial":
