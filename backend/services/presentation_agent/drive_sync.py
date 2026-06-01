@@ -266,10 +266,9 @@ def _load_logo_data_url(filename: str, mime: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 
-# Loaded once at import. Light-on-blue mark for dark slides; full-color symbol
-# for light slides. Embedded once in CSS (background-image) so 8 slides don't
-# duplicate ~50KB of base64 data 8 times.
-_LOGO_ON_BLUE = _load_logo_data_url("logo-secondary-symbol-cropped.png", "image/png")
+# Primary symbol used on all slides. The secondary symbol (dark-blue on dark-blue)
+# is invisible on the blue title/closing slides, so we use the primary everywhere.
+_LOGO_ON_BLUE = _load_logo_data_url("logo-primary-symbol.jpg", "image/jpeg")
 _LOGO_ON_WHITE = _load_logo_data_url("logo-primary-symbol.jpg", "image/jpeg")
 
 
@@ -787,7 +786,7 @@ body {
 
 /* ---------- t-data (single big stat + sources) ---------- */
 .t-data { padding: 170px 120px 140px; display: flex; flex-direction: column; justify-content: center; }
-.t-data .fig { font-family: var(--font-display); font-weight: 900; font-size: 120px; line-height: 1; letter-spacing: -0.02em; color: var(--chawq-main-blue); margin: 0 0 40px; max-width: 1600px; }
+.t-data .fig { font-family: var(--font-display); font-weight: 900; font-size: 80px; line-height: 1.1; letter-spacing: -0.02em; color: var(--chawq-main-blue); margin: 0 0 40px; max-width: 1600px; overflow-wrap: break-word; }
 .t-data .framing { font-family: var(--font-body); font-size: 32px; line-height: 1.4; color: var(--chawq-fg-2); margin: 0 0 56px; max-width: 1400px; }
 .t-data ul.sources { list-style: none; margin: 0; padding: 0; }
 .t-data ul.sources li { font-family: var(--font-mono); font-size: 16px; color: var(--chawq-fg-3); padding: 8px 0; border-top: 1px solid var(--chawq-line); display: flex; justify-content: space-between; align-items: center; gap: 16px; }
