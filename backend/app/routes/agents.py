@@ -39,7 +39,10 @@ from pydantic import BaseModel, Field
 
 from agents.email_drafter import EmailDrafterInput
 from core.settings import get_settings
-from services.email_drafter_runner import run_email_drafter_for_lead
+from services.email_drafter_runner import (
+    run_email_drafter_for_lead,
+    run_email_reply_for_lead,
+)
 from services.firestore.client import (
     get_agent_run,
     put_agent_run,
@@ -245,12 +248,77 @@ def _dispatch_research(run_id: str, inputs: dict[str, Any]) -> None:
             )
 
 
+def _dispatch_email_reply(run_id: str, inputs: dict[str, Any]) -> None:
+    """
+    BackgroundTask entry for the in-thread reply drafter via /agents/run.
+
+    Same lifecycle as _dispatch_email_drafter. `inputs.triggering_event`
+    carries what the reply should convey; `inputs.thread_id` (preferred) or
+    `inputs.reply_to_contact` / `inputs.contact_email` selects the thread.
+    Recipients default to the thread's last sender; to_recipients /
+    cc_recipients on inputs override. Never raises.
+    """
+    started_at = datetime.now(tz=timezone.utc)
+    try:
+        update_agent_run(run_id, {"status": "running", "started_at": started_at})
+    except Exception:
+        logger.exception(
+            "agents.run failed to flip status to running",
+            extra={"run_id": run_id, "agent": "email_drafter_reply"},
+        )
+
+    try:
+        input_ = EmailDrafterInput(
+            contact_id=inputs.get("contact_id") or "unknown",
+            contact_first_name=inputs.get("contact_first_name") or "",
+            contact_last_name=inputs.get("contact_last_name") or "",
+            contact_title=inputs.get("contact_title"),
+            contact_organization=(
+                inputs.get("contact_organization") or "(unknown organization)"
+            ),
+            contact_municipality=inputs.get("contact_municipality"),
+            contact_email=inputs.get("contact_email"),
+            to_recipients=inputs.get("to_recipients"),
+            cc_recipients=inputs.get("cc_recipients"),
+            append_signature=inputs.get("append_signature", True),
+            from_user=inputs.get("from_user"),
+            triggering_event=inputs.get("triggering_event") or "(no specific ask)",
+            triggering_event_summary=inputs.get("triggering_event_summary"),
+        )
+        run_email_reply_for_lead(
+            input_,
+            thread_id=inputs.get("thread_id"),
+            contact_email_for_search=inputs.get("reply_to_contact"),
+            run_id=run_id,
+        )
+    except Exception as exc:
+        logger.exception(
+            "agents.run email_drafter_reply dispatch failed",
+            extra={"run_id": run_id},
+        )
+        try:
+            update_agent_run(
+                run_id,
+                {
+                    "status": "failed",
+                    "finished_at": datetime.now(tz=timezone.utc),
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "agents.run failed to record failure",
+                extra={"run_id": run_id},
+            )
+
+
 # Maps `agent` field on POST body to dispatcher function.
 # Each dispatcher takes (run_id, inputs) and is responsible for its own
 # agent_runs lifecycle writes after the POST handler writes the stub.
 # Add a new agent by wiring its dispatcher here.
 AGENT_DISPATCH: dict[str, Callable[[str, dict[str, Any]], None]] = {
     "email_drafter": _dispatch_email_drafter,
+    "email_drafter_reply": _dispatch_email_reply,
     "research": _dispatch_research,
     # "scoring": _dispatch_scoring,              # Phase 2
 }

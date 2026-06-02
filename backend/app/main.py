@@ -22,7 +22,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import agents, contacts, health, sync, webhooks
+from app.routes import agents, contacts, gmail, health, sync, webhooks
 from core.logging import configure_logging
 from core.settings import get_settings
 
@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(agents.router, prefix="/agents", tags=["agents"])
     app.include_router(sync.router, prefix="/sync", tags=["sync"])
     app.include_router(contacts.router, prefix="/contacts", tags=["contacts"])
+    app.include_router(gmail.router, prefix="/gmail", tags=["gmail"])
 
     return app
 
