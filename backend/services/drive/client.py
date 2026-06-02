@@ -229,6 +229,64 @@ def list_folder_files(
     return files
 
 
+def move_file(
+    file_id: str,
+    new_parent_folder_id: str,
+    old_parent_folder_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Move `file_id` from one Drive folder to another via the Drive API's
+    add/remove-parents pattern. If `old_parent_folder_id` is not provided
+    we fetch the file's current parents and remove them all (covers the
+    common case of a single-parent file).
+
+    Returns the updated metadata: id, name, parents, webViewLink.
+
+    Used by `scripts/route_iflytek.py` to relocate iflytek recordings out
+    of the flat Iflytek Files dump and into per-lead Stage subfolders.
+    """
+    service = _get_drive_service()
+
+    if old_parent_folder_id is None:
+        meta = (
+            service.files()
+            .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+            .execute()
+        )
+        old_parents = meta.get("parents") or []
+        remove = ",".join(old_parents) if old_parents else ""
+    else:
+        remove = old_parent_folder_id
+
+    response = (
+        service.files()
+        .update(
+            fileId=file_id,
+            addParents=new_parent_folder_id,
+            removeParents=remove,
+            fields="id, name, parents, webViewLink",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    return response
+
+
+def list_subfolders(parent_folder_id: str) -> list[dict[str, Any]]:
+    """
+    Convenience filter on `list_folder_files`: returns only the folder
+    children (one level). Each entry has id, name, modifiedTime, parents.
+
+    Used by the iflytek sweeper to build a lead-folder index and to look
+    up existing `Stage <N> - <suffix>` subfolders inside a lead.
+    """
+    return [
+        child
+        for child in list_folder_files(parent_folder_id)
+        if child.get("mimeType") == FOLDER_MIME
+    ]
+
+
 def get_file_metadata(file_id: str) -> dict[str, Any] | None:
     """
     Fetch a single file's metadata.

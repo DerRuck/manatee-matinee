@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     drive_service_account_file: str = ""
     drive_watch_folder_id: str = ""
     drive_output_root_folder_id: str = ""  # Where agent outputs get mirrored.
+    # Iflytek scraper's flat dump folder. The route_iflytek sweeper moves
+    # recordings out of here into per-lead Stage subfolders.
+    drive_iflytek_folder_id: str = ""
+    # Root of the Leads tree. Contains one folder per lead (municipality
+    # or contact named), each with `Stage <N> - <suffix>` subfolders for
+    # meeting recordings + transcripts.
+    drive_leads_root_folder_id: str = ""
 
     # --- Gmail (drafts via domain-wide delegation) ---
     # Default mailbox the Email Drafter impersonates when EmailDrafterInput
