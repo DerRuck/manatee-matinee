@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 from agents.email_drafter import EmailDrafterInput
 from core.settings import get_settings
 from services.email_drafter_runner import run_email_drafter_for_lead
+from services.feedback_runner import run_feedback_for_lead
 from services.firestore.client import (
     get_agent_run,
     put_agent_run,
@@ -245,6 +246,59 @@ def _dispatch_research(run_id: str, inputs: dict[str, Any]) -> None:
             )
 
 
+def _dispatch_feedback(run_id: str, inputs: dict[str, Any]) -> None:
+    """
+    BackgroundTask entry for the Feedback Agent via /agents/run.
+
+    Flips the stub's status to "running" with started_at, then invokes
+    run_feedback_for_lead with the stub's run_id so the runner's terminal
+    write merges into the same doc.
+
+    `inputs["run_id"]` names the ORIGINAL deliverable run this feedback is
+    about (the schema link); the feedback run itself uses `run_id` (this
+    stub's id). The runner reads the original via agent_runs[original],
+    extracts a diff when `revised_text` is present, categorizes the
+    reaction, and writes the `feedback` record.
+
+    Never raises — failures are caught and recorded on agent_runs so the
+    GET endpoint can surface them.
+    """
+    started_at = datetime.now(tz=timezone.utc)
+    try:
+        update_agent_run(
+            run_id,
+            {"status": "running", "started_at": started_at},
+        )
+    except Exception:
+        logger.exception(
+            "agents.run failed to flip status to running",
+            extra={"run_id": run_id, "agent": "feedback"},
+        )
+        # Continue — the runner's terminal write will still land.
+
+    try:
+        run_feedback_for_lead(inputs, run_id=run_id)
+    except Exception as exc:
+        logger.exception(
+            "agents.run feedback dispatch failed",
+            extra={"run_id": run_id},
+        )
+        try:
+            update_agent_run(
+                run_id,
+                {
+                    "status": "failed",
+                    "finished_at": datetime.now(tz=timezone.utc),
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "agents.run failed to record feedback failure",
+                extra={"run_id": run_id},
+            )
+
+
 # Maps `agent` field on POST body to dispatcher function.
 # Each dispatcher takes (run_id, inputs) and is responsible for its own
 # agent_runs lifecycle writes after the POST handler writes the stub.
@@ -252,6 +306,7 @@ def _dispatch_research(run_id: str, inputs: dict[str, Any]) -> None:
 AGENT_DISPATCH: dict[str, Callable[[str, dict[str, Any]], None]] = {
     "email_drafter": _dispatch_email_drafter,
     "research": _dispatch_research,
+    "feedback": _dispatch_feedback,
     # "scoring": _dispatch_scoring,              # Phase 2
 }
 

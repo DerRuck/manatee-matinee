@@ -88,6 +88,67 @@ def update_agent_run(run_id: str, fields: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Feedback (human review of agent deliverables)
+# ---------------------------------------------------------------------------
+
+def put_feedback(feedback_id: str, record: dict[str, Any]) -> None:
+    """
+    Upsert one row in the `feedback` collection, keyed by feedback_id (the
+    feedback run's own run_id).
+
+    set(merge=True) for the same reason as put_agent_run — the feedback
+    runner may write twice (a partial record then a terminal one) without
+    clobbering earlier fields. The `record` should carry `original_run_id`
+    so feedback links back to the deliverable it's about (the schema link).
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_feedback_collection
+    client.collection(collection).document(feedback_id).set(record, merge=True)
+
+
+def get_feedback(feedback_id: str) -> dict[str, Any] | None:
+    """Read one `feedback` row by feedback_id. Returns the dict or None."""
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_feedback_collection
+    snap = client.collection(collection).document(feedback_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+def list_feedback_for_run(original_run_id: str) -> list[dict[str, Any]]:
+    """
+    Return all feedback records that point at one deliverable run, newest
+    first. The query side of the schema link: given a deliverable's run_id,
+    find every piece of feedback captured against it.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = client.collection(settings.firestore_feedback_collection)
+    query = collection.where(
+        filter=FieldFilter("original_run_id", "==", original_run_id)
+    )
+    return [snap.to_dict() for snap in query.stream()]
+
+
+def link_feedback_to_run(original_run_id: str, feedback_id: str) -> None:
+    """
+    Append `feedback_id` to the deliverable run's `feedback_ids` array via
+    ArrayUnion (idempotent — re-linking the same id is a no-op). The other
+    half of the schema link: from a deliverable run you can reach its
+    feedback without a collection scan.
+    """
+    client = _get_client()
+    settings = get_settings()
+    collection = settings.firestore_agent_runs_collection
+    client.collection(collection).document(original_run_id).set(
+        {"feedback_ids": firestore.ArrayUnion([feedback_id])}, merge=True
+    )
+
+
+# ---------------------------------------------------------------------------
 # Documents + chunks (vector ingest)
 # ---------------------------------------------------------------------------
 
