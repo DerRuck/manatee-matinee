@@ -23,7 +23,9 @@ import logging
 import os
 from typing import Any, Iterator
 
+import httplib2
 from google.auth import default, impersonated_credentials
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
@@ -34,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 SA_EMAIL = "chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+
+# Socket timeout (seconds) applied to every Drive API call. httplib2's
+# default is no timeout, so a stalled connection blocks the caller forever —
+# the failure mode behind a research run hanging at "running" after its
+# upload socket broke. A bounded timeout turns an indefinite hang into a
+# clean error the runner records as status="partial".
+DRIVE_HTTP_TIMEOUT_SECONDS = 60
 
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 
@@ -102,7 +111,10 @@ def _get_drive_service():
             lifetime=3600,
         )
 
-    _drive_service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    authed_http = AuthorizedHttp(
+        creds, http=httplib2.Http(timeout=DRIVE_HTTP_TIMEOUT_SECONDS)
+    )
+    _drive_service = build("drive", "v3", http=authed_http, cache_discovery=False)
     return _drive_service
 
 
