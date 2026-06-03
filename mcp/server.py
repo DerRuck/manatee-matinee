@@ -107,7 +107,7 @@ def chawq_agent_run(agent: str, inputs: dict) -> dict:
 
     Args:
         agent: Agent identifier. Currently supported: ``"email_drafter"``,
-            ``"research"``.
+            ``"research"``, ``"feedback"``.
         inputs: Agent-specific input dict.
 
             * ``email_drafter`` expects: ``contact_id``, ``contact_first_name``,
@@ -116,6 +116,12 @@ def chawq_agent_run(agent: str, inputs: dict) -> dict:
               ``triggering_event``, optional ``triggering_event_summary``.
             * ``research`` expects: ``research_type`` (e.g. ``"PW-3"``,
               ``"S1-4"``, ``"LOBBY-1"``) plus the inputs that prompt requires.
+            * ``feedback`` expects: ``run_id`` (the ORIGINAL deliverable run
+              being reviewed), ``contact_id``, ``reaction`` (one of
+              ``approved`` / ``edits_requested`` / ``rerun_requested`` /
+              ``rejected``), optional ``note`` (free text), and optional
+              ``revised_text`` (the reviewer's edited version — diffed against
+              the original). The feedback run gets its own ``run_id`` back.
 
     Returns:
         Dict with ``run_id`` (uuid string) and ``status`` (typically

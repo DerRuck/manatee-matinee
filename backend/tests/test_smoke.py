@@ -98,6 +98,34 @@ def test_agents_run_queues_a_run(mock_put):
     assert record["inputs"]["contact_email"] == "test@chawq.org"
 
 
+@patch.dict(
+    "app.routes.agents.AGENT_DISPATCH",
+    {"feedback": lambda run_id, inputs: None},
+    clear=False,
+)
+@patch("app.routes.agents.put_agent_run")
+def test_agents_run_accepts_feedback_agent(mock_put):
+    with TestClient(app) as client:
+        resp = client.post(
+            "/agents/run",
+            json={
+                "agent": "feedback",
+                "inputs": {
+                    "run_id": "orig-deliverable-1",
+                    "contact_id": "contact-9",
+                    "reaction": "edits_requested",
+                    "note": "too formal",
+                },
+            },
+        )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "pending"
+    mock_put.assert_called_once()
+    _run_id, record = mock_put.call_args.args
+    assert record["agent"] == "feedback"
+    assert record["contact_id"] == "contact-9"
+
+
 @patch("app.routes.agents.put_agent_run")
 def test_agents_run_rejects_unknown_agent(mock_put):
     with TestClient(app) as client:
