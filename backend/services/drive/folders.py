@@ -98,7 +98,7 @@ def ensure_subfolder(service: Any, parent_id: str, name: str) -> str:
         supportsAllDrives=True,
         includeItemsFromAllDrives=True,
         pageSize=1,
-    ).execute().get("files", [])
+    ).execute(num_retries=3).get("files", [])
 
     if existing:
         folder_id = existing[0]["id"]
@@ -111,7 +111,7 @@ def ensure_subfolder(service: Any, parent_id: str, name: str) -> str:
             },
             fields="id, name",
             supportsAllDrives=True,
-        ).execute()
+        ).execute(num_retries=3)
         folder_id = created["id"]
 
     _FOLDER_CACHE[cache_key] = folder_id

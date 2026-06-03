@@ -27,6 +27,13 @@ steps:
       - '--set-env-vars=ENV=prod,GCP_PROJECT_ID=chawq-manatee-matinee,DRIVE_WATCH_FOLDER_ID=1CJmk437SVaFcWqVBrsIOMYO1ac7oZHHq,GHL_LOCATION_ID=As8Nc8kEs6J86YgDIi9Q,DRIVE_OUTPUT_ROOT_FOLDER_ID=1CJmk437SVaFcWqVBrsIOMYO1ac7oZHHq'
       - '--set-secrets=ANTHROPIC_API_KEY=anthropic-api-key:latest,GHL_PIT=ghl-pit:latest,GHL_WEBHOOK_SECRET=ghl-webhook-secret:latest,CHAWQ_SHARED_SECRET=chawq-shared-secret:latest'
       - '--service-account=chawq-api-runtime@chawq-manatee-matinee.iam.gserviceaccount.com'
+      # Agent runs execute in a FastAPI BackgroundTask after the 202 response.
+      # With CPU throttled to ~0 post-response (the default) the long research
+      # call is starved and its sockets break mid-flight — the BrokenPipe seen
+      # on stuck runs. Allocate CPU always, and keep one warm instance so the
+      # task isn't killed by scale-to-zero before it writes a terminal status.
+      - '--no-cpu-throttling'
+      - '--min-instances=1'
 
 serviceAccount: 'projects/chawq-manatee-matinee/serviceAccounts/chawq-builder@chawq-manatee-matinee.iam.gserviceaccount.com'
 

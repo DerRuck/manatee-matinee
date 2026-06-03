@@ -24,6 +24,8 @@ google-cloud-firestore>=2.16.0
 google-cloud-storage>=2.16.0
 google-auth>=2.29.0
 google-api-python-client>=2.126.0
+google-auth-httplib2>=0.2.0  # AuthorizedHttp wrapper — lets us set a Drive socket timeout
+httplib2>=0.22.0  # transport under the Drive client; we construct it with a timeout
 google-cloud-aiplatform>=1.49.0  # Vertex text-embedding-005 + future Gemini calls
 
 # --- Document parsers (ingestion pipeline) ---
