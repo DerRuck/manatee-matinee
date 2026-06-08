@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # or contact named), each with `Stage <N> - <suffix>` subfolders for
     # meeting recordings + transcripts.
     drive_leads_root_folder_id: str = ""
+    # Root of the Events & Conferences tree. Contains one folder per
+    # event (date-prefixed, e.g. `2026-04 FWRC`) plus operational
+    # folders (Abstracts & Bios, Presentations, etc.) — the iflytek
+    # sweeper only routes into date-prefixed conference folders.
+    drive_conferences_root_folder_id: str = ""
 
     # --- Gmail (drafts via domain-wide delegation) ---
     # Default mailbox the Email Drafter impersonates when EmailDrafterInput

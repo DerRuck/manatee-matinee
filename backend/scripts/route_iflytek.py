@@ -1,10 +1,19 @@
 """
-Iflytek → Leads sweeper.
+Iflytek → Leads + Conferences sweeper.
 
 Moves iflytek recording quartets (.opus + _Transcript.txt + .pdf +
 Google Doc summary) out of the flat `Iflytek Files/` dump on Drive and
-into the appropriate lead's `Stage <N> - <suffix>` subfolder under the
-Leads tree.
+into either:
+
+  - a lead's `Stage <N> - <suffix>` subfolder under the Leads tree, or
+  - a date-prefixed conference folder under the Events & Conferences
+    tree (e.g. `2026-04 FWRC`).
+
+Lead match wins precedence — a meeting WITH a lead AT a conference
+(e.g. "Meetup at UF Water Symposium with SFWMD") routes to the SFWMD
+lead. Conference routing is the fallback for files that don't name a
+lead but do name a conference. Anything matching neither lands in
+`Iflytek Files/_needs_routing/`.
 
 Filename-only routing — PM owns the naming convention documented in the
 `iflytek export paths` Google Doc:
@@ -128,6 +137,32 @@ class LeadFolder:
         return None
 
 
+@dataclass
+class ConferenceFolder:
+    """
+    One date-prefixed conference folder under the Events & Conferences
+    root. Same keyword-set matching shape as LeadFolder, but routing to
+    a conference drops at the folder root — no stage equivalent.
+    """
+
+    folder_id: str
+    name: str
+    keywords: set[str] = field(default_factory=set)
+
+    def matches(self, candidates: list[str]) -> Optional[str]:
+        for candidate in candidates:
+            if candidate in self.keywords:
+                return candidate
+        return None
+
+
+# Folder names that count as routable conferences must look like
+# `YYYY-MM ...`, `YYYY-MM-DD ...`, `YY-MM-DD ...`. Operational folders
+# (`Abstracts & Bios`, `Conference Intelligence Bot`, etc.) don't match
+# and stay out of the index.
+_CONFERENCE_NAME_DATE_PREFIX_RE = re.compile(r"^\d{2,4}-\d{1,2}(-\d{1,2})?[\s_-]+")
+
+
 def build_lead_index(leads_root_id: str) -> list[LeadFolder]:
     """
     Scan the Leads root once and build per-folder keyword aliases.
@@ -172,6 +207,65 @@ def build_lead_index(leads_root_id: str) -> list[LeadFolder]:
         leads.append(LeadFolder(folder_id=child["id"], name=name, keywords=kws))
 
     return leads
+
+
+def build_conference_index(conferences_root_id: str) -> list[ConferenceFolder]:
+    """
+    Scan the Events & Conferences root and index the date-prefixed
+    conference folders. Operational folders (no date prefix) are
+    skipped so a generic-named recording can't accidentally land in
+    `Abstracts & Bios` or `Presentations`.
+
+    Keyword aliases per conference: the name with the date prefix
+    stripped (in lowercase + no-space form), individual tokens of length
+    >= 3, and pair tokens — same pattern as the lead index so the
+    matcher can compare the two indexes uniformly.
+    """
+    conferences: list[ConferenceFolder] = []
+    for child in list_subfolders(conferences_root_id):
+        name = child.get("name", "")
+        if not name or name.startswith("_"):
+            continue
+        if not _CONFERENCE_NAME_DATE_PREFIX_RE.match(name):
+            continue  # skip operational folders without a date prefix
+
+        # Strip the date prefix to get the human-readable conference label.
+        label = _CONFERENCE_NAME_DATE_PREFIX_RE.sub("", name, count=1)
+        lower_full = name.lower().strip()
+        lower_label = label.lower().strip()
+
+        kws: set[str] = set()
+        kws.add(lower_full)
+        kws.add(lower_label)
+        kws.add(re.sub(r"[\s_]+", "", lower_label))
+
+        tokens = [
+            tok for tok in re.split(r"[\s_\-|/(),.]+", lower_label) if tok and len(tok) >= 3
+        ]
+        for tok in tokens:
+            kws.add(tok)
+        for i in range(len(tokens) - 1):
+            kws.add(f"{tokens[i]} {tokens[i + 1]}")
+
+        conferences.append(
+            ConferenceFolder(folder_id=child["id"], name=name, keywords=kws)
+        )
+
+    return conferences
+
+
+def find_conference_for_group(
+    group: IflytekGroup, conferences: list[ConferenceFolder]
+) -> Optional[tuple[ConferenceFolder, str]]:
+    """Best-effort conference match. Same shape as `find_lead_for_group`."""
+    candidates = keyword_candidates(group.parsed.client_remainder)
+    if not candidates:
+        return None
+    for conf in conferences:
+        hit = conf.matches(candidates)
+        if hit:
+            return conf, hit
+    return None
 
 
 def find_lead_for_group(
@@ -248,11 +342,16 @@ def find_or_create_stage_folder(
 @dataclass
 class SweepStats:
     groups_seen: int = 0
-    groups_routed: int = 0
-    groups_deferred: int = 0      # too-recent (within settle window)
+    groups_routed_lead: int = 0       # lead match (stage subfolder or lead root)
+    groups_routed_conference: int = 0 # conference match (conference folder root)
+    groups_deferred: int = 0          # too-recent (within settle window)
     groups_unmatched: int = 0
     files_moved: int = 0
     errors: int = 0
+
+    @property
+    def groups_routed(self) -> int:
+        return self.groups_routed_lead + self.groups_routed_conference
 
 
 def move_group_to_folder(
@@ -364,6 +463,15 @@ def main() -> None:
         help="Drive folder ID of the Leads root. Defaults to settings.drive_leads_root_folder_id.",
     )
     parser.add_argument(
+        "--conferences-root-id",
+        default=None,
+        help=(
+            "Drive folder ID of the Events & Conferences root. Defaults to "
+            "settings.drive_conferences_root_folder_id. Optional — when unset, "
+            "conference routing is disabled and only lead routing runs."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the plan without touching Drive. No moves, no folder creation, no triage logs.",
@@ -382,6 +490,9 @@ def main() -> None:
     settings = get_settings()
     iflytek_id = args.iflytek_folder_id or settings.drive_iflytek_folder_id
     leads_root_id = args.leads_root_id or settings.drive_leads_root_folder_id
+    conferences_root_id = (
+        args.conferences_root_id or settings.drive_conferences_root_folder_id
+    )
 
     if not iflytek_id:
         parser.error(
@@ -395,8 +506,8 @@ def main() -> None:
         )
 
     logger.info(
-        "sweeper starting — iflytek=%s leads=%s dry_run=%s",
-        iflytek_id, leads_root_id, args.dry_run,
+        "sweeper starting — iflytek=%s leads=%s conferences=%s dry_run=%s",
+        iflytek_id, leads_root_id, conferences_root_id or "(disabled)", args.dry_run,
     )
     started = time.monotonic()
 
@@ -413,6 +524,22 @@ def main() -> None:
             "Check DRIVE_LEADS_ROOT_FOLDER_ID + that the runtime SA has read on that folder.",
             leads_root_id,
         )
+
+    conferences: list[ConferenceFolder] = []
+    if conferences_root_id:
+        conferences = build_conference_index(conferences_root_id)
+        logger.info("indexed conferences: count=%d", len(conferences))
+        if conferences:
+            for conf in conferences:
+                sample_kws = sorted(conf.keywords)[:8]
+                logger.info("  conference: %r kws=%s%s", conf.name, sample_kws,
+                            " ..." if len(conf.keywords) > 8 else "")
+        else:
+            logger.warning(
+                "conferences index is EMPTY — no date-prefixed subfolders found "
+                "under conferences root %s. Check the folder ID + SA access.",
+                conferences_root_id,
+            )
 
     iflytek_children = list_folder_files(iflytek_id)
     groups = group_iflytek_files(iflytek_children)
@@ -442,8 +569,24 @@ def main() -> None:
 
         match = find_lead_for_group(group, leads)
         if match is None:
+            # Lead miss — try a conference match before giving up.
+            conf_match = (
+                find_conference_for_group(group, conferences) if conferences else None
+            )
+            if conf_match is not None:
+                conf, conf_kw = conf_match
+                logger.info(
+                    "conference match — basename=%r → conference=%r (matched_kw=%r)",
+                    group.basename, conf.name, conf_kw,
+                )
+                stats.groups_routed_conference += 1
+                move_group_to_folder(
+                    group, conf.folder_id, iflytek_id, args.dry_run, stats
+                )
+                continue
+
             logger.info(
-                "no lead match — basename=%r remainder=%r stage=%s → _needs_routing",
+                "no lead/conference match — basename=%r remainder=%r stage=%s → _needs_routing",
                 group.basename, group.parsed.client_remainder, group.parsed.stage_number,
             )
             stats.groups_unmatched += 1
@@ -468,7 +611,7 @@ def main() -> None:
                 "lead matched, no stage — basename=%r lead=%r matched_kw=%r → lead root",
                 group.basename, lead.name, matched_kw,
             )
-            stats.groups_routed += 1
+            stats.groups_routed_lead += 1
             move_group_to_folder(group, lead.folder_id, iflytek_id, args.dry_run, stats)
             continue
 
@@ -495,17 +638,18 @@ def main() -> None:
             "routing — basename=%r → lead=%r stage=%d (matched_kw=%r)",
             group.basename, lead.name, group.parsed.stage_number, matched_kw,
         )
-        stats.groups_routed += 1
+        stats.groups_routed_lead += 1
         if stage_folder_id is not None:
             move_group_to_folder(group, stage_folder_id, iflytek_id, args.dry_run, stats)
 
     elapsed = time.monotonic() - started
     logger.info(
-        "sweeper finished — seen=%d routed=%d deferred=%d unmatched=%d "
-        "files_moved=%d errors=%d elapsed=%.1fs dry_run=%s",
-        stats.groups_seen, stats.groups_routed, stats.groups_deferred,
-        stats.groups_unmatched, stats.files_moved, stats.errors,
-        elapsed, args.dry_run,
+        "sweeper finished — seen=%d routed=%d (lead=%d conf=%d) deferred=%d "
+        "unmatched=%d files_moved=%d errors=%d elapsed=%.1fs dry_run=%s",
+        stats.groups_seen, stats.groups_routed,
+        stats.groups_routed_lead, stats.groups_routed_conference,
+        stats.groups_deferred, stats.groups_unmatched,
+        stats.files_moved, stats.errors, elapsed, args.dry_run,
     )
 
 
